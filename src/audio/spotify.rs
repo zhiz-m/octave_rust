@@ -66,7 +66,6 @@ pub async fn get_playlist(playlist_id: &str) -> Result<Vec<(Song, Option<Work>)>
             None => continue,
         };
     }
-    println!("spotdl function finished");
     Ok(songs)
 }
 

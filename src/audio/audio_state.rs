@@ -1,5 +1,6 @@
 use std::{
     sync::Arc,
+    mem::drop,
 };
 use rand::seq::SliceRandom;
 use super::{
@@ -34,6 +35,7 @@ pub struct AudioState{
     handler: Arc<SerenityMutex<Call>>,
     current_song: Mutex<Option<Song>>,
     track_handle: Mutex<Option<TrackHandle>>,
+    is_looping: Mutex<bool>,
 }
 
 impl AudioState{
@@ -43,6 +45,7 @@ impl AudioState{
             handler,
             current_song: Mutex::new(None),
             track_handle: Mutex::new(None),
+            is_looping: Mutex::new(false),
         };
         let audio_state = Arc::new(audio_state);
         {
@@ -55,10 +58,16 @@ impl AudioState{
     }
 
     async fn play_audio(audio_state: Arc<AudioState>){
-        let mut song = audio_state.queue.pop().await;
-        println!("hi3");
+        let is_looping = audio_state.is_looping.lock().await;
+        let mut song = if *is_looping{
+            let mut current_song = audio_state.current_song.lock().await;
+            current_song.take().expect("logical error: expected current_song to be non-empty")
+        }else{
+            audio_state.queue.pop().await
+        };
+        drop(is_looping);
+
         let url = song.get_url().await;
-        println!("hi4 {}", url);
         let source = ffmpeg_pcm(url).await;
         let source = match source {
             Ok(source) => source,
@@ -70,7 +79,6 @@ impl AudioState{
         let reader = Reader::Extension(source);
         let source = input::Input::float_pcm(true, reader);
 
-        println!("hi4.5");
         let mut handler = audio_state.handler.lock().await;
         
         let handle = handler.play_source(source);
@@ -88,7 +96,6 @@ impl AudioState{
         *current_song = Some(song);
         let mut track_handle = audio_state.track_handle.lock().await;
         *track_handle = Some(handle);
-        println!("hi5");
     }
 
     pub async fn add_audio(audio_state: Arc<AudioState>, query: &str, shuffle: bool){
@@ -126,6 +133,32 @@ impl AudioState{
         audio_state.queue.clear().await
     }
 
+    pub async fn change_looping(audio_state: Arc<AudioState>) -> Result<bool, String>{
+        let current_song = audio_state.current_song.lock().await;
+        if current_song.is_none() {
+            return Err("no song is playing".to_string());
+        }
+        let mut is_looping = audio_state.is_looping.lock().await;
+        *is_looping = !*is_looping;
+        Ok(*is_looping)
+        /*
+        if looping{
+            if *is_looping{
+                Err("already looping".to_string())
+            }else{
+                *is_looping = true;
+                Ok(())
+            }
+        }else{
+            if !*is_looping{
+                Err("not looping at the moment".to_string())
+            }else{
+                *is_looping = false;
+                Ok(())
+            }
+        }*/
+    }
+
     pub async fn cleanup(audio_state: Arc<AudioState>) {
         audio_state.queue.cleanup().await;
     }
@@ -136,7 +169,7 @@ impl AudioState{
             Some(song) => song.get_string().await,
             None => "*Not playing*\n".to_string(),
         };
-        format!("**Current Song:**\n{}\n**Queue:**\n{}", current_song, audio_state.queue.get_string().await)
+        format!("**Current Song:**\n{}\n\n**Queue:**\n{}", current_song, audio_state.queue.get_string().await)
     }
 }
 
@@ -149,7 +182,6 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        println!("SongEndNotifier event has started");
         AudioState::play_audio(self.audio_state.clone()).await;
 
         None

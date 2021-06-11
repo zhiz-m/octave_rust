@@ -19,8 +19,6 @@ impl Loader{
     }
     async fn loader_loop(mut work: mpsc::Receiver<Work>,){
         while let Some(work) = work.recv().await {
-            println!("hi2");
-            // update this
             let url = ytdl(&work.query).await;
     
             if let Err(err) = work.sender.send(url).await{

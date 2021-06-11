@@ -40,10 +40,10 @@ impl Song{
         let work = Work{
             sender: tx,
             is_loaded: is_loaded.clone(),
-            query: query,
+            query,
         };
         let url_state = SongUrlState::Proc{
-            is_loaded: is_loaded,
+            is_loaded,
             receiver: rx,
             work: work.clone(),
         };
@@ -80,7 +80,7 @@ impl Song{
             Some(artist) => artist,
             None => "unknown",
         };
-        let title = match &metadata.artist{
+        let title = match &metadata.title{
             Some(title) => title,
             None => "unknown",
         };

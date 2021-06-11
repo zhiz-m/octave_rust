@@ -10,13 +10,12 @@ use tokio::process::Command as TokioCommand;
 pub async fn ytdl(query: &str) -> String{
     let mut cmd = TokioCommand::new("youtube-dl");
     let cmd = cmd
-                       .arg("-x")
-                       .arg("--skip-download")
-                       .arg("--get-url")
-                       .arg("--audio-quality").arg("128k")
-                       .arg(query);
+        .arg("-x")
+        .arg("--skip-download")
+        .arg("--get-url")
+        .arg("--audio-quality").arg("128k")
+        .arg(query);
     let out = cmd.output().await.unwrap();
-    println!("ytdl process finished");
     String::from_utf8(out.stdout).unwrap()
 }
 //  -> Result<Box<dyn Read + Send>, String>

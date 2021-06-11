@@ -26,7 +26,7 @@ use crate::util::{
 };
 
 #[group]
-#[commands(join,disconnect,play,skip,pause,resume,shuffle,clear,splay,queue)]
+#[commands(join,disconnect,play,skip,pause,resume,change_loop,shuffle,clear,splay,queue)]
 struct Audio;
 
 lazy_static! {
@@ -113,7 +113,6 @@ async fn disconnect(ctx: &Context, msg: &Message) -> CommandResult{
 #[command]
 async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
     let query = args.rest();
-    println!("{}",query);
 
     let audio_state = get_audio_state(ctx, msg).await;
     let audio_state = match audio_state{
@@ -131,7 +130,6 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
 #[command]
 async fn splay(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
     let query = args.rest();
-    println!("{}",query);
 
     let audio_state = get_audio_state(ctx, msg).await;
     let audio_state = match audio_state{
@@ -225,6 +223,23 @@ async fn clear(ctx: &Context, msg: &Message) -> CommandResult{
         message_react(ctx, msg, "🗑").await;
     };
 
+    Ok(())
+}
+
+#[command]
+#[aliases("loop")]
+async fn change_loop(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    match AudioState::change_looping(audio_state).await {
+        Ok(true) => message_react(ctx, msg, "🔄").await,
+        Ok(false) => message_react(ctx, msg, "➡").await,
+        Err(why) => send_embed(ctx, msg, &format!("Error: {}", why)).await,
+    };
     Ok(())
 }
 

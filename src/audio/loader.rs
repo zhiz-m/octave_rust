@@ -18,11 +18,7 @@ impl Loader{
         };
     }
     async fn loader_loop(mut work: mpsc::Receiver<Work>,){
-        loop{
-            let work = match work.recv().await{
-                Some(work)=>work,
-                None=>break,
-            };
+        while let Some(work) = work.recv().await {
             println!("hi2");
             // update this
             let url = ytdl(&work.query).await;
@@ -33,7 +29,7 @@ impl Loader{
 
             {
                 let mut is_loaded = work.is_loaded.lock().await;
-                assert!(*is_loaded == false);
+                assert!(!*is_loaded);
                 *is_loaded = true;
             }
         }

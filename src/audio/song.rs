@@ -40,10 +40,10 @@ impl Song{
         let work = Work{
             sender: tx,
             is_loaded: is_loaded.clone(),
-            query: query.clone(),
+            query: query,
         };
         let url_state = SongUrlState::Proc{
-            is_loaded: is_loaded.clone(),
+            is_loaded: is_loaded,
             receiver: rx,
             work: work.clone(),
         };

@@ -33,9 +33,8 @@ impl SongQueue{
         let loader = self.loader.lock().await;
         for item in songs.into_iter(){
             queue.push_back(item.0);
-            match item.1{
-                Some(work) => loader.add_work(work).await,
-                None =>{},
+            if let Some(work) = item.1{
+                loader.add_work(work).await;
             };
             //self.loader.add_work(item.1).await;
         }

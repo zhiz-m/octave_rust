@@ -92,7 +92,7 @@ async fn remove_audio_state(ctx: &Context, msg: &Message) -> Result<(), String> 
 #[command]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult{
     let audio_state = get_audio_state(ctx, msg).await;
-    if let Some(_) = audio_state{
+    if audio_state.is_some(){
         message_react(ctx, msg, "🥳").await;
     }
 

@@ -11,16 +11,15 @@ pub async fn process_query(query: &str) -> Result<Vec<(Song, Option<Work>)>, Str
     if query.contains("spotify") && query.contains("/playlist/"){
         let split: Vec<&str> = query
             .split("/playlist/")
-            .filter(|s| s.len() > 0)
+            .filter(|s| !s.is_empty())
             .collect();
         if split.len() != 2 {
             return Err("invalid spotify playlist URL".to_string());
         }
         let playlist_id = split[1];
         let playlist_id = playlist_id
-            .split("?")
-            .filter(|s| s.len() > 0)
-            .next()
+            .split('?')
+            .find(|s| !s.is_empty())
             .expect("Logical error: process_query's playlist_id contains items?");
         let songs = match get_playlist(playlist_id).await{
             Ok(songs) => songs,

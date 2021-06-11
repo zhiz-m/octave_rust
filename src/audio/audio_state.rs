@@ -40,7 +40,7 @@ impl AudioState{
     pub fn new(handler: Arc<SerenityMutex<Call>>) -> Arc<AudioState>{
         let audio_state = AudioState{
             queue: SongQueue::new(),
-            handler: handler.clone(),
+            handler,
             current_song: Mutex::new(None),
             track_handle: Mutex::new(None),
         };

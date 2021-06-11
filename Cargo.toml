@@ -8,6 +8,8 @@ edition = "2018"
 
 [dependencies]
 lazy_static = "1.4.0"
+rand = "0.8.3"
+rspotify = {git = "https://github.com/ramsayleung/rspotify"}
 serenity = {version = "0.10", features = ["standard_framework", "voice", "rustls_backend", "cache", "framework"] }
 songbird = "0.1.6"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "time", "sync"] }

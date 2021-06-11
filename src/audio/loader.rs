@@ -3,7 +3,7 @@ use tokio::{
 };
 use super::{
     work::Work,
-    youtube::ytdl,
+    subprocess::ytdl,
 };
 
 pub struct Loader {
@@ -43,6 +43,12 @@ impl Loader{
             }
         }
     }
+
+    pub async fn cleanup(&mut self) {
+        if let Err(why) = self.kill.send(()).await{
+            println!("Error on Loader::cleanup: {}",why);
+        };
+    }
     
     pub fn new() -> Loader{
         let (work_tx, work_sx) = mpsc::channel(200);
@@ -64,4 +70,3 @@ impl Loader{
         f.abort();
     }
 }
-

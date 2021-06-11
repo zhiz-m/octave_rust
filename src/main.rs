@@ -1,3 +1,4 @@
+use std::env;
 use serenity::{async_trait, client::{Client, Context, EventHandler}, framework::{
         StandardFramework,
     }, model::gateway::Ready};
@@ -7,6 +8,7 @@ use songbird::{
 };
 
 mod audio;
+mod util;
 
 struct Handler;
 
@@ -20,7 +22,7 @@ impl EventHandler for Handler{
 
 #[tokio::main]
 async fn main() {
-    let token = "ODQyMzUyNjcxMTE2NDkyODIy.YJ0EDg.JP9PZHKGc23ZF_5W-j-gipnbYW8";
+    let token = env::var("OCTAVE_BOT_TOKEN").expect("Error: token not found");
     let framework = StandardFramework::new()
         .configure(|c|{
             c.prefix("a.")

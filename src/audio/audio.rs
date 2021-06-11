@@ -2,13 +2,19 @@ use std::{
     sync::Arc,
     collections::HashMap,
 };
+use rspotify::model::idtypes::Track;
 use serenity::{
     client::Context, 
     framework::standard::{
         Args, CommandResult,
         macros::{command, group},
     },
-    http::Http, model::{channel::Message, id::{ChannelId, GuildId}}};
+    http::Http, model::{channel::Message, id::{ChannelId, GuildId}}
+};
+use songbird::tracks::{
+    TrackHandle,
+    TrackCommand,
+};
 use tokio::{
     sync::Mutex,
 };
@@ -17,8 +23,14 @@ use super::{
     audio_state::AudioState,
 };
 
+use crate::util::{
+    send_message,
+    send_embed,
+    message_react,
+};
+
 #[group]
-#[commands(play)]
+#[commands(join,play,skip,pause,resume,shuffle,clear,splay,queue)]
 struct Audio;
 
 lazy_static! {
@@ -45,6 +57,7 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
             let channel_id = match channel_id{
                 Some(channel_id) => channel_id,
                 None => {
+                    send_embed(ctx, msg, "Error: please be in a voice channel").await;
                     return None;
                 }
             };
@@ -66,6 +79,41 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
     }
 }
 
+async fn remove_audio_state(ctx: &Context, msg: &Message) -> Result<(), String> {
+    let guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild_id = guild.id;
+
+    let mut audio_states = AUDIO_STATES.lock().await;
+
+    if let Some(state) = audio_states.remove(&guild_id){
+        AudioState::cleanup(state).await;
+        Ok(())
+    }else{
+        Err("bot is not currently active".to_string())
+    }
+}
+
+#[command]
+async fn join(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    if let Some(_) = audio_state{
+        message_react(ctx, msg, "🥳").await;
+    }
+
+    Ok(())
+}
+
+#[command]
+#[aliases("leave")]
+async fn disconnect(ctx: &Context, msg: &Message) -> CommandResult{
+    match remove_audio_state(ctx, msg).await{
+        Ok(()) => message_react(ctx, msg, "👋").await,
+        Err(why) => send_embed(ctx, msg, &format!("Error: {}", why)).await,
+    };
+
+    Ok(())
+}
+
 #[command]
 async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
     let query = args.rest();
@@ -75,10 +123,124 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
     let audio_state = match audio_state{
         Some(audio_state) => audio_state,
         None => return Ok(())
-        
     };
 
-    AudioState::add_audio(audio_state, query).await;
+    AudioState::add_audio(audio_state, query, false).await;
+
+    message_react(ctx, msg, "🎶").await;
+
+    Ok(())
+}
+
+#[command]
+async fn splay(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
+    let query = args.rest();
+    println!("{}",query);
+
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    AudioState::add_audio(audio_state, query, true).await;
+
+    message_react(ctx, msg, "🔀").await;
+    message_react(ctx, msg, "🎶").await;
+
+    Ok(())
+}
+
+#[command]
+async fn skip(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    if let Err(why) = AudioState::send_track_command(audio_state, TrackCommand::Stop).await {
+        send_embed(ctx, msg, &format!("Error: {}", why)).await;
+    }else {
+        message_react(ctx, msg, "↪").await;
+    };
+    Ok(())
+}
+
+#[command]
+async fn pause(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    if let Err(why) = AudioState::send_track_command(audio_state, TrackCommand::Pause).await {
+        send_embed(ctx, msg, &format!("Error: {}", why)).await;
+    }else {
+        message_react(ctx, msg, "⏸").await;
+    };
+    Ok(())
+}
+
+#[command]
+async fn resume(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    if let Err(why) = AudioState::send_track_command(audio_state, TrackCommand::Play).await {
+        send_embed(ctx, msg, &format!("Error: {}", why)).await;
+    }else {
+        message_react(ctx, msg, "▶").await;
+    };
+    Ok(())
+}
+
+#[command]
+async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    if let Err(why) = AudioState::shuffle(audio_state).await {
+        send_embed(ctx, msg, &format!("Error: {}", why)).await;
+    } else{
+        message_react(ctx, msg, "🔀").await;
+    };
+    Ok(())
+}
+
+#[command]
+async fn clear(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    if let Err(why) = AudioState::clear(audio_state.clone()).await {
+        send_embed(ctx, msg, &format!("Error: {}", why)).await;
+    } else{
+        message_react(ctx, msg, "🗑").await;
+    };
+
+    Ok(())
+}
+
+#[command]
+async fn queue(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    send_embed(ctx, msg,&AudioState::get_string(audio_state).await).await;
 
     Ok(())
 }

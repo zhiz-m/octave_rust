@@ -3,6 +3,7 @@ use std::{
 };
 use tokio::sync::{mpsc, Mutex};
 
+#[derive(Clone)]
 pub struct Work{
     pub sender: mpsc::Sender<String>,
     pub query: String,

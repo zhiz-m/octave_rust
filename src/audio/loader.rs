@@ -12,14 +12,9 @@ pub struct Loader {
 }
 
 impl Loader{
-    pub async fn kill(& self){
-        if let Err(err) = self.kill.send(()).await{
-            println!("Error in Loader.kill: {}", err.to_string());
-        };
-    }
     pub async fn add_work(& self, work: Work){
         if let Err(err) = self.work.send(work).await{
-            println!("Error in Loader.kill: {}", err.to_string());
+            println!("Error in Loader::add_work: {}", err.to_string());
         };
     }
     async fn loader_loop(mut work: mpsc::Receiver<Work>,){
@@ -33,7 +28,7 @@ impl Loader{
             let url = ytdl(&work.query).await;
     
             if let Err(err) = work.sender.send(url).await{
-                println!("Error in loader_loop: {:?}", err);
+                println!("Error in Loader::loader_loop: {:?}", err);
             };
 
             {

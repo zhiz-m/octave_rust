@@ -55,9 +55,6 @@ impl Song{
         };
         Some((song, Some(work)))
     }
-    pub fn get_metadata(&self) -> &SongMetadata {
-        return &self.metadata;
-    }
     pub async fn get_url(&mut self) -> String{
         match &mut self.url_state{
             SongUrlState::Proc{receiver,..} => {

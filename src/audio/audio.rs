@@ -2,19 +2,15 @@ use std::{
     sync::Arc,
     collections::HashMap,
 };
-use rspotify::model::idtypes::Track;
 use serenity::{
     client::Context, 
     framework::standard::{
         Args, CommandResult,
         macros::{command, group},
     },
-    http::Http, model::{channel::Message, id::{ChannelId, GuildId}}
+    model::{channel::Message, id::GuildId}
 };
-use songbird::tracks::{
-    TrackHandle,
-    TrackCommand,
-};
+use songbird::tracks::TrackCommand;
 use tokio::{
     sync::Mutex,
 };
@@ -30,7 +26,7 @@ use crate::util::{
 };
 
 #[group]
-#[commands(join,play,skip,pause,resume,shuffle,clear,splay,queue)]
+#[commands(join,disconnect,play,skip,pause,resume,shuffle,clear,splay,queue)]
 struct Audio;
 
 lazy_static! {
@@ -63,7 +59,7 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
             };
             let manager = songbird::get(ctx)
                 .await
-                .expect("Err get_audio_state: Songbird not initialized")
+                .unwrap()
                 .clone();
             let (handle_lock, success) = manager.join(guild_id, channel_id).await;
             if let Err(err) = success{

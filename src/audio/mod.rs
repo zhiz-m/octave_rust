@@ -2,11 +2,12 @@ pub mod audio;
 pub mod audio_state;
 
 mod song;
-mod loader;
+mod youtube_loader;
 mod song_queue;
 mod subprocess;
 mod work;
 mod spotify;
-mod query;
+mod song_searcher;
+mod config;
 
 pub use audio::*;

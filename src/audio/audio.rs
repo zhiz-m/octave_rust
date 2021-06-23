@@ -26,7 +26,7 @@ use crate::util::{
 };
 
 #[group]
-#[commands(join,disconnect,play,skip,pause,resume,change_loop,shuffle,clear,splay,queue)]
+#[commands(join,disconnect,play,splay,cure,extend,skip,pause,resume,change_loop,shuffle,clear,queue)]
 struct Audio;
 
 lazy_static! {
@@ -140,6 +140,66 @@ async fn splay(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
     AudioState::add_audio(audio_state, query, true).await;
 
     message_react(ctx, msg, "🔀").await;
+    message_react(ctx, msg, "🎶").await;
+
+    Ok(())
+}
+
+#[command]
+async fn cure(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult{
+    let query= match args.single::<String>(){
+        Ok(query) => query,
+        Err(_) => {
+            send_embed(ctx, msg, "Error: invalid Spotify playlist").await;
+            return Ok(())
+        }
+    };
+    let amount = match args.single::<usize>(){
+        Ok(amount) => amount,
+        Err(_) => {
+            20
+        }
+    };
+
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    AudioState::add_recommended_songs(audio_state, &query, amount).await;
+
+    message_react(ctx, msg, "🍻").await;
+    message_react(ctx, msg, "🎶").await;
+
+    Ok(())
+}
+
+#[command]
+async fn extend(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult{
+    let query= match args.single::<String>(){
+        Ok(query) => query,
+        Err(_) => {
+            send_embed(ctx, msg, "Error: invalid Spotify playlist").await;
+            return Ok(())
+        }
+    };
+    let extend_ratio = match args.single::<f64>(){
+        Ok(amount) => amount,
+        Err(_) => {
+            0.5
+        }
+    };
+
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    AudioState::extend_songs(audio_state, &query, extend_ratio).await;
+
+    message_react(ctx, msg, "🍻").await;
     message_react(ctx, msg, "🎶").await;
 
     Ok(())

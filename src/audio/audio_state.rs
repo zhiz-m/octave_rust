@@ -8,7 +8,10 @@ use super::{
     song::{
         Song,
     },
-    query::process_query,
+    song_searcher::{
+        process_query,
+        song_recommender,
+    },
     subprocess::ffmpeg_pcm,
 };
 use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent, 
@@ -112,6 +115,37 @@ impl AudioState{
         audio_state.queue.push(songs).await;
     }
 
+    pub async fn add_recommended_songs(audio_state: Arc<AudioState>, query: &str, amount: usize){
+        let songs = match song_recommender(query, amount).await{
+            Ok(songs) => songs,
+            Err(why) => {
+                println!("Error add_recommended_songs: {}", why);
+                return;
+            },
+        };
+        audio_state.queue.push(songs).await;
+    }
+
+    pub async fn extend_songs(audio_state: Arc<AudioState>, query: &str, extend_ratio: f64){
+        let mut songs = match process_query(query).await{
+            Ok(songs) => songs,
+            Err(why) => {
+                println!("Error extend_songs: {}", why);
+                return;
+            },
+        };
+        let recommended_songs = match song_recommender(query, (songs.len() as f64 * extend_ratio) as usize).await{
+            Ok(songs) => songs,
+            Err(why) => {
+                println!("Error add_recommended_songs: {}", why);
+                return;
+            },
+        };
+        songs.extend(recommended_songs);
+        songs.shuffle(&mut rand::thread_rng());
+        audio_state.queue.push(songs).await;
+    }
+
     pub async fn send_track_command(audio_state: Arc<AudioState>, cmd: TrackCommand) -> Result<(), String>{
         let track_handle = audio_state.track_handle.lock().await;
         match &*track_handle {
@@ -134,9 +168,11 @@ impl AudioState{
     }
 
     pub async fn change_looping(audio_state: Arc<AudioState>) -> Result<bool, String>{
-        let current_song = audio_state.current_song.lock().await;
-        if current_song.is_none() {
-            return Err("no song is playing".to_string());
+        {
+            let current_song = audio_state.current_song.lock().await;
+            if current_song.is_none() {
+                return Err("no song is playing".to_string());
+            }
         }
         let mut is_looping = audio_state.is_looping.lock().await;
         *is_looping = !*is_looping;

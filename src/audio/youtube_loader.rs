@@ -6,12 +6,12 @@ use super::{
     subprocess::ytdl,
 };
 
-pub struct Loader {
+pub struct YoutubeLoader {
     work: mpsc::Sender<Work>,
     kill: mpsc::Sender<()>,
 }
 
-impl Loader{
+impl YoutubeLoader{
     pub async fn add_work(& self, work: Work){
         if let Err(err) = self.work.send(work).await{
             println!("Error in Loader::add_work: {}", err.to_string());
@@ -39,13 +39,13 @@ impl Loader{
         };
     }
     
-    pub fn new() -> Loader{
+    pub fn new() -> YoutubeLoader{
         let (work_tx, work_sx) = mpsc::channel(200);
         let (kill_tx, kill_sx) = mpsc::channel(1);
         tokio::spawn(async move{
-            Loader::start_loader_loop(work_sx, kill_sx).await
+            YoutubeLoader::start_loader_loop(work_sx, kill_sx).await
         });
-        Loader{
+        YoutubeLoader{
             work: work_tx,
             kill: kill_tx,
         }
@@ -53,7 +53,7 @@ impl Loader{
     
     async fn start_loader_loop(work: mpsc::Receiver<Work>, mut kill: mpsc::Receiver<()>){
         let f = tokio::spawn(async move {
-            Loader::loader_loop(work).await
+            YoutubeLoader::loader_loop(work).await
         });
         kill.recv().await;
         f.abort();

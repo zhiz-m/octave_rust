@@ -2,6 +2,7 @@ use std::{
     sync::Arc,
     collections::VecDeque,
     mem::drop,
+    cmp::min,
 };
 use tokio::sync::{Semaphore, Mutex};
 use rand::seq::SliceRandom;
@@ -10,11 +11,11 @@ use super::{
         Song,
         SongUrlState,
     },
-    loader::Loader,
+    youtube_loader::YoutubeLoader,
     work::Work,
 };
 pub struct SongQueue{
-    loader: Arc<Mutex<Loader>>,
+    loader: Arc<Mutex<YoutubeLoader>>,
     queue: Arc<Mutex<VecDeque<Song>>>,
     queue_sem: Semaphore,
 }
@@ -22,7 +23,7 @@ pub struct SongQueue{
 impl SongQueue{
     pub fn new() -> SongQueue {
         SongQueue{
-            loader: Arc::new(Mutex::new(Loader::new())),
+            loader: Arc::new(Mutex::new(YoutubeLoader::new())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             queue_sem: Semaphore::new(0),
         }
@@ -75,7 +76,7 @@ impl SongQueue{
     async fn reset_loader(&self) {
         let mut loader = self.loader.lock().await;
         loader.cleanup().await;
-        *loader = Loader::new();
+        *loader = YoutubeLoader::new();
     }
     pub async fn cleanup(&self) {
         let mut loader = self.loader.lock().await;
@@ -87,7 +88,8 @@ impl SongQueue{
             return "*empty*".to_string();
         };
         let mut s = String::new();
-        for song in queue.iter(){
+        s.push_str(&format!("*Showing {} of {} songs*\n", min(20, queue.len()), queue.len()));
+        for song in queue.iter().take(20){
             s += &song.get_string().await;
             s += "\n";
         }

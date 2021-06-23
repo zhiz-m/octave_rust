@@ -47,7 +47,7 @@ pub async fn ffmpeg_pcm(url: String) -> Result<Box<dyn Read + Send>, String>{
         Some(out) => out,
         None => return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string()),
     };
-    let buf = BufReader::with_capacity(16384, out);
+    let buf = BufReader::with_capacity(16384*8, out);
     let buf: Box<dyn Read + Send> = Box::new(buf);
     Ok(buf)
 }

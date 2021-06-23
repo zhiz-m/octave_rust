@@ -89,7 +89,8 @@ impl SongQueue{
         };
         let mut s = String::new();
         s.push_str(&format!("*Showing {} of {} songs*\n", min(20, queue.len()), queue.len()));
-        for song in queue.iter().take(20){
+        for (i, song) in queue.iter().take(20).enumerate(){
+            s += &format!("{}: ", i);
             s += &song.get_string().await;
             s += "\n";
         }

@@ -100,7 +100,7 @@ impl AudioState{
         let source = match source {
             Ok(source) => source,
             Err(why) => {
-                println!("Error in AudioState::play_audio: {}",why);
+                println!("Error in AudioState::play_audio: {}", why);
                 return
             }
         };
@@ -127,12 +127,10 @@ impl AudioState{
                 "Now playing:\n\n {}", text
             )).await;
         }
-        {
-            let mut current_song = audio_state.current_song.lock().await;
-            *current_song = Some(song);
-            let mut track_handle = audio_state.track_handle.lock().await;
-            *track_handle = Some(handle);
-        }
+        let mut current_song = audio_state.current_song.lock().await;
+        *current_song = Some(song);
+        let mut track_handle = audio_state.track_handle.lock().await;
+        *track_handle = Some(handle);
     }
 
     pub async fn add_audio(audio_state: Arc<AudioState>, query: &str, shuffle: bool){
@@ -150,13 +148,14 @@ impl AudioState{
     }
 
     pub async fn add_recommended_songs(audio_state: Arc<AudioState>, query: &str, amount: usize){
-        let songs = match song_recommender(query, amount).await{
+        let mut songs = match song_recommender(query, amount).await{
             Ok(songs) => songs,
             Err(why) => {
                 println!("Error add_recommended_songs: {}", why);
                 return;
             },
         };
+        songs.shuffle(&mut rand::thread_rng());
         audio_state.queue.push(songs).await;
     }
 
@@ -182,7 +181,7 @@ impl AudioState{
 
     pub async fn send_track_command(audio_state: Arc<AudioState>, cmd: TrackCommand) -> Result<(), String>{
         let track_handle = audio_state.track_handle.lock().await;
-        match &*track_handle {
+        match track_handle.as_ref() {
             Some(track_handle) => {
                 match track_handle.send(cmd){
                     Ok(()) => Ok(()),
@@ -201,6 +200,7 @@ impl AudioState{
         audio_state.queue.clear().await
     }
 
+    // on success, returns a bool that specifies whether the queue is now being looped
     pub async fn change_looping(audio_state: Arc<AudioState>) -> Result<bool, String>{
         {
             let current_song = audio_state.current_song.lock().await;
@@ -244,8 +244,6 @@ impl AudioState{
 }
 
 struct SongEndNotifier {
-    //chan_id: ChannelId,
-    //http: Arc<Http>,
     audio_state: Arc<AudioState>,
 }
 

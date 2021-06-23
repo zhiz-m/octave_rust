@@ -19,6 +19,8 @@ use super::{
     audio_state::AudioState,
 };
 
+use super::config::audio as config_audio;
+
 use crate::util::{
     send_message,
     send_embed,
@@ -43,7 +45,9 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
 
     match audio_states.get(&guild_id) {
         Some(state) => {
-            Some(state.clone())
+            let state = state.clone();
+            AudioState::set_context(state.clone(), ctx, msg).await;
+            Some(state)
         }
         None => {
             let channel_id = guild
@@ -66,7 +70,7 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
                 println!("Error: {:?}", err);
                 return None;
             }
-            let audio_state = AudioState::new(handle_lock);
+            let audio_state = AudioState::new(handle_lock, ctx, msg);
             {
                 audio_states.insert(guild_id, audio_state.clone());
             }
@@ -187,7 +191,7 @@ async fn extend(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult{
     let extend_ratio = match args.single::<f64>(){
         Ok(amount) => amount,
         Err(_) => {
-            0.5
+            config_audio::EXTEND_RATIO
         }
     };
 

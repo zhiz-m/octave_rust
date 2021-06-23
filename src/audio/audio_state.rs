@@ -14,6 +14,7 @@ use super::{
     },
     subprocess::ffmpeg_pcm,
 };
+use crate::util::send_embed_http;
 use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent, 
     input::{
         self,
@@ -30,7 +31,13 @@ use serenity::{
     async_trait,
     prelude::{
         Mutex as SerenityMutex,
-    }
+    },
+    http::Http,
+    client::Context,
+    model::{
+        id::ChannelId,
+        channel::Message,
+    },
 };
 
 pub struct AudioState{
@@ -39,16 +46,22 @@ pub struct AudioState{
     current_song: Mutex<Option<Song>>,
     track_handle: Mutex<Option<TrackHandle>>,
     is_looping: Mutex<bool>,
+
+    channel_id: Mutex<ChannelId>,
+    http: Mutex<Arc<Http>>,
 }
 
 impl AudioState{
-    pub fn new(handler: Arc<SerenityMutex<Call>>) -> Arc<AudioState>{
+    pub fn new(handler: Arc<SerenityMutex<Call>>, ctx: &Context, msg: &Message) -> Arc<AudioState>{
         let audio_state = AudioState{
             queue: SongQueue::new(),
             handler,
             current_song: Mutex::new(None),
             track_handle: Mutex::new(None),
             is_looping: Mutex::new(false),
+
+            channel_id: Mutex::new(msg.channel_id),
+            http: Mutex::new(ctx.http.clone()),
         };
         let audio_state = Arc::new(audio_state);
         {
@@ -58,6 +71,17 @@ impl AudioState{
             });
         }
         audio_state
+    }
+
+    pub async fn set_context(audio_state: Arc<AudioState>, ctx: &Context, msg: &Message){
+        {
+            let mut channel_id = audio_state.channel_id.lock().await;
+            *channel_id = msg.channel_id;
+        }
+        {
+            let mut http = audio_state.http.lock().await;
+            *http = ctx.http.clone();
+        }
     }
 
     async fn play_audio(audio_state: Arc<AudioState>){
@@ -70,6 +94,7 @@ impl AudioState{
         };
         drop(is_looping);
 
+        
         let url = song.get_url().await;
         let source = ffmpeg_pcm(url).await;
         let source = match source {
@@ -94,11 +119,20 @@ impl AudioState{
         ){
             panic!("Err AudioState::play_audio: {:?}", why);
         }
-        
-        let mut current_song = audio_state.current_song.lock().await;
-        *current_song = Some(song);
-        let mut track_handle = audio_state.track_handle.lock().await;
-        *track_handle = Some(handle);
+        {
+            let text = song.get_string().await;
+            let channel_id = audio_state.channel_id.lock().await;
+            let http = audio_state.http.lock().await;
+            send_embed_http(*channel_id, http.clone(), &format!(
+                "Now playing:\n\n {}", text
+            )).await;
+        }
+        {
+            let mut current_song = audio_state.current_song.lock().await;
+            *current_song = Some(song);
+            let mut track_handle = audio_state.track_handle.lock().await;
+            *track_handle = Some(handle);
+        }
     }
 
     pub async fn add_audio(audio_state: Arc<AudioState>, query: &str, shuffle: bool){

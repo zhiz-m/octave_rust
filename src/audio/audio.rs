@@ -28,7 +28,7 @@ use crate::util::{
 };
 
 #[group]
-#[commands(join,disconnect,play,splay,cure,extend,skip,pause,resume,change_loop,shuffle,clear,queue)]
+#[commands(join,disconnect,play,splay,cure,extend,skip,pause,resume,change_loop,shuffle,clear,queue,stream_type)]
 struct Audio;
 
 lazy_static! {
@@ -303,6 +303,24 @@ async fn change_loop(ctx: &Context, msg: &Message) -> CommandResult{
         Ok(true) => message_react(ctx, msg, "🔄").await,
         Ok(false) => message_react(ctx, msg, "➡").await,
         Err(why) => send_embed(ctx, msg, &format!("Error: {}", why)).await,
+    };
+    Ok(())
+}
+
+#[command]
+#[aliases("st")]
+async fn stream_type(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
+    let query = args.rest();
+    let audio_state = get_audio_state(ctx, msg).await;
+    let audio_state = match audio_state{
+        Some(audio_state) => audio_state,
+        None => return Ok(())
+    };
+
+    match AudioState::change_stream_type(audio_state, query).await {
+        Ok(true) => message_react(ctx, msg, "✅").await,
+        Err(why) => send_embed(ctx, msg, &format!("Error: {}", why)).await,
+        _ => {}
     };
     Ok(())
 }

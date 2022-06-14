@@ -1,4 +1,5 @@
 use std::env;
+use audio::config;
 use serenity::{async_trait, client::{Client, Context, EventHandler}, framework::{
         StandardFramework,
     }, model::gateway::Ready};
@@ -25,7 +26,8 @@ async fn main() {
     let token = env::var("OCTAVE_BOT_TOKEN").expect("Error: token not found");
     let framework = StandardFramework::new()
         .configure(|c|{
-            c.prefix("a.")
+            //c.prefix("a.")
+            c.prefix(config::audio::BOT_PREFIX)
         })
         .group(&audio::AUDIO_GROUP);
     

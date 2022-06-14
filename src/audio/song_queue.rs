@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use super::{
     song::{
         Song,
-        SongUrlState,
+        SongBufConfigState,
     },
     youtube_loader::YoutubeLoader,
     work::Work,
@@ -58,8 +58,8 @@ impl SongQueue{
         let loader = self.loader.lock().await;
 
         for song in queue.iter(){
-            match &song.url_state{
-                SongUrlState::Proc{work,..} => loader.add_work(work.clone()).await,
+            match &song.buf_config_state{
+                SongBufConfigState::Proc{work,..} => loader.add_work(work.clone()).await,
             };
         };
 
@@ -90,7 +90,7 @@ impl SongQueue{
         let mut s = String::new();
         s.push_str(&format!("*Showing {} of {} songs*\n", min(20, queue.len()), queue.len()));
         for (i, song) in queue.iter().take(20).enumerate(){
-            s += &format!("{}: ", i);
+            s += &format!("{}. ", i+1);
             s += &song.get_string().await;
             s += "\n";
         }

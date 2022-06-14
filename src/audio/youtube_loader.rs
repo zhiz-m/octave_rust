@@ -3,12 +3,15 @@ use tokio::{
 };
 use super::{
     work::Work,
-    subprocess::ytdl,
+    subprocess::{
+        get_pcm_reader_config
+    },
 };
 
 pub struct YoutubeLoader {
     work: mpsc::Sender<Work>,
     kill: mpsc::Sender<()>,
+    
 }
 
 impl YoutubeLoader{
@@ -19,12 +22,19 @@ impl YoutubeLoader{
     }
     async fn loader_loop(mut work: mpsc::Receiver<Work>,){
         while let Some(work) = work.recv().await {
-            let url = ytdl(&work.query).await;
-    
-            if let Err(err) = work.sender.send(url).await{
-                println!("Error in Loader::loader_loop: {:?}", err);
+            
+            let buf_config = match get_pcm_reader_config(&work.query, work.stream_type).await {
+                Ok(buf) => Some(buf),
+                Err(why) => {
+                    println!("Error in Loader::loader_loop: {:?}", why);
+                    None
+                }
             };
-
+    
+            if let Err(why) = work.sender.send(buf_config).await{
+                println!("Error in Loader::loader_loop: {}", why.to_string());
+            };
+            
             {
                 let mut is_loaded = work.is_loaded.lock().await;
                 assert!(!*is_loaded);

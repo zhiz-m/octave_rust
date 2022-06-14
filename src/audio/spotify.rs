@@ -15,7 +15,10 @@ use rspotify::{
 };
 
 use rand::{
-    seq::IteratorRandom,
+    seq::{
+        IteratorRandom,
+        SliceRandom,
+    },
     distributions::{
         WeightedIndex,
         Distribution,
@@ -36,7 +39,7 @@ use super::{
         Song,
         SongMetadata,
     },
-    work::Work,
+    work::{Work, StreamType},
     config::spotify_recommend as sr,
 };
 
@@ -106,7 +109,7 @@ impl SpotifyClient{
             client: spotify,
         })
     }
-    pub fn process_track_objects(tracks: Vec<TrackObject>) -> Vec<(Song, Option<Work>)> {
+    pub fn process_track_objects(tracks: Vec<TrackObject>, stream_type: StreamType) -> Vec<(Song, Option<Work>)> {
         let mut songs = vec![];
         for track in tracks.into_iter(){
             let artist = track.artist();
@@ -118,7 +121,7 @@ impl SpotifyClient{
                 youtube_url: None,
                 duration: Some(track.duration()),
             };
-            match Song::new_load(metadata){
+            match Song::new_load(metadata, stream_type){
                 Some(data) => songs.push(data),
                 None => continue,
             };
@@ -152,6 +155,24 @@ impl SpotifyClient{
             tracks.push(TrackObject::FullTrack(track));
         }
         Ok(tracks)
+    }
+    pub async fn get_track(&self, track_id: &str) -> Result<TrackObject, String>{
+        let track_id = Id::from_id(track_id);
+        let track_id = match track_id{
+            Ok(track_id) => track_id,
+            Err(why) => {
+                return Err(format!("spotify::get_track: {:?}", why));
+            }
+        };
+        let track = self.client.track(track_id).await;
+        let track = match track{
+            Ok(track) => track,
+            Err(why)=>{
+                println!("Error in spotify.get_track: {:?}", why);
+                return Err(format!("spotify::get_track: {:?}", why));
+            }
+        };
+        Ok(TrackObject::FullTrack(track))
     }
     async fn random_from_artist(&self, id: &str) -> Option<TrackObject>{
         let id = match Id::from_id(id){
@@ -262,6 +283,7 @@ impl SpotifyClient{
                 None => continue,
             }
         }
+        tracks.shuffle(&mut rand::thread_rng());
         Ok(tracks)
     }
     fn get_query_string(artist: &str, title: &str) -> String{

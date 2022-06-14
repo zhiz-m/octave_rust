@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod audio_state;
+pub mod config;
 
 mod song;
 mod youtube_loader;
@@ -8,6 +9,5 @@ mod subprocess;
 mod work;
 mod spotify;
 mod song_searcher;
-mod config;
 
 pub use audio::*;

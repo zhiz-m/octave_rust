@@ -12,7 +12,7 @@ use super::{
         process_query,
         song_recommender,
     },
-    subprocess::ffmpeg_pcm,
+    subprocess::get_pcm_reader, work::StreamType,
 };
 use crate::util::send_embed_http;
 use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent, 
@@ -26,7 +26,13 @@ use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, Tra
     }
 
 };
-use tokio::sync::Mutex;
+use tokio::{
+    sync::{
+        Mutex,
+        Semaphore,
+    },
+    time::timeout,
+};
 use serenity::{
     async_trait,
     prelude::{
@@ -39,6 +45,7 @@ use serenity::{
         channel::Message,
     },
 };
+use super::config::audio as audio_config;
 
 pub struct AudioState{
     queue: SongQueue,
@@ -46,6 +53,8 @@ pub struct AudioState{
     current_song: Mutex<Option<Song>>,
     track_handle: Mutex<Option<TrackHandle>>,
     is_looping: Mutex<bool>,
+    song_ready: Semaphore,
+    current_stream_type: Mutex<StreamType>,
 
     channel_id: Mutex<ChannelId>,
     http: Mutex<Arc<Http>>,
@@ -59,6 +68,8 @@ impl AudioState{
             current_song: Mutex::new(None),
             track_handle: Mutex::new(None),
             is_looping: Mutex::new(false),
+            song_ready: Semaphore::new(1),
+            current_stream_type: Mutex::new(StreamType::Online),
 
             channel_id: Mutex::new(msg.channel_id),
             http: Mutex::new(ctx.http.clone()),
@@ -67,7 +78,7 @@ impl AudioState{
         {
             let audio_state = audio_state.clone();
             tokio::spawn(async {
-                AudioState::play_audio(audio_state).await;
+                AudioState::play_audio_loop(audio_state).await;
             });
         }
         audio_state
@@ -84,57 +95,87 @@ impl AudioState{
         }
     }
 
-    async fn play_audio(audio_state: Arc<AudioState>){
-        let is_looping = audio_state.is_looping.lock().await;
-        let mut song = if *is_looping{
+    async fn play_audio_loop(audio_state: Arc<AudioState>){
+        loop{
+            match timeout(audio_config::TIMEOUT_DURATION, audio_state.clone().song_ready.acquire()).await {
+                Ok(x) => {
+                    x.expect("Err AudioState::play_audio_loop: failed to acquire song_ready semaphore").forget();
+                },
+                _ => {
+                    {
+                        let mut handler = audio_state.handler.lock().await;
+                        if let Err(_) = handler.leave().await{
+                            println!("AudioState::play_audio_loop: handler failed to leave");
+                        };
+                    }
+                    AudioState::cleanup(audio_state).await;
+                    return;
+                },
+            };
+
+            let is_looping = audio_state.is_looping.lock().await;
+            let mut song = if *is_looping{
+                let mut current_song = audio_state.current_song.lock().await;
+                current_song.take().expect("logical error: expected current_song to be non-empty")
+            }else{
+                audio_state.queue.pop().await
+            };
+            drop(is_looping);
+
+            
+            let buf_config = match song.get_buf_config().await {
+                Some(buf) => buf,
+                None => {
+                    println!("AudioState::play_audio: no song buffer found");
+                    AudioState::play_next_song(audio_state.clone());
+                    continue;
+                }
+            };
+            let source = get_pcm_reader(buf_config).await;
+            let source = match source {
+                Ok(source) => source,
+                Err(why) => {
+                    println!("Error in AudioState::play_audio: {}", why);
+                    AudioState::play_next_song(audio_state.clone());
+                    continue;
+                }
+            };
+            let reader = Reader::Extension(source);
+            let source = input::Input::float_pcm(true, reader);
+
+            let mut handler = audio_state.handler.lock().await;
+            
+            let handle = handler.play_source(source);
+
+            if let Err(why) = handle.add_event(
+                Event::Track(TrackEvent::End),
+                SongEndNotifier{
+                    audio_state: audio_state.clone(),
+                }
+            ){
+                panic!("Err AudioState::play_audio: {:?}", why);
+            }
+            {
+                let text = song.get_string().await;
+                let channel_id = audio_state.channel_id.lock().await;
+                let http = audio_state.http.lock().await;
+                send_embed_http(*channel_id, http.clone(), &format!(
+                    "Now playing:\n\n {}", text
+                )).await;
+            }
             let mut current_song = audio_state.current_song.lock().await;
-            current_song.take().expect("logical error: expected current_song to be non-empty")
-        }else{
-            audio_state.queue.pop().await
-        };
-        drop(is_looping);
-
-        
-        let url = song.get_url().await;
-        let source = ffmpeg_pcm(url).await;
-        let source = match source {
-            Ok(source) => source,
-            Err(why) => {
-                println!("Error in AudioState::play_audio: {}", why);
-                return
-            }
-        };
-        let reader = Reader::Extension(source);
-        let source = input::Input::float_pcm(true, reader);
-
-        let mut handler = audio_state.handler.lock().await;
-        
-        let handle = handler.play_source(source);
-
-        if let Err(why) = handle.add_event(
-            Event::Track(TrackEvent::End),
-            SongEndNotifier{
-                audio_state: audio_state.clone(),
-            }
-        ){
-            panic!("Err AudioState::play_audio: {:?}", why);
+            *current_song = Some(song);
+            let mut track_handle = audio_state.track_handle.lock().await;
+            *track_handle = Some(handle);
         }
-        {
-            let text = song.get_string().await;
-            let channel_id = audio_state.channel_id.lock().await;
-            let http = audio_state.http.lock().await;
-            send_embed_http(*channel_id, http.clone(), &format!(
-                "Now playing:\n\n {}", text
-            )).await;
-        }
-        let mut current_song = audio_state.current_song.lock().await;
-        *current_song = Some(song);
-        let mut track_handle = audio_state.track_handle.lock().await;
-        *track_handle = Some(handle);
+    }
+
+    pub fn play_next_song(audio_state: Arc<AudioState>){
+        audio_state.song_ready.add_permits(1);
     }
 
     pub async fn add_audio(audio_state: Arc<AudioState>, query: &str, shuffle: bool){
-        let mut songs = match process_query(query).await{
+        let mut songs = match process_query(query, *audio_state.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
                 println!("Error add_audio: {}", why);
@@ -148,26 +189,25 @@ impl AudioState{
     }
 
     pub async fn add_recommended_songs(audio_state: Arc<AudioState>, query: &str, amount: usize){
-        let mut songs = match song_recommender(query, amount).await{
+        let songs = match song_recommender(query, amount, *audio_state.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
                 println!("Error add_recommended_songs: {}", why);
                 return;
             },
         };
-        songs.shuffle(&mut rand::thread_rng());
         audio_state.queue.push(songs).await;
     }
 
     pub async fn extend_songs(audio_state: Arc<AudioState>, query: &str, extend_ratio: f64){
-        let mut songs = match process_query(query).await{
+        let mut songs = match process_query(query, *audio_state.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
                 println!("Error extend_songs: {}", why);
                 return;
             },
         };
-        let recommended_songs = match song_recommender(query, (songs.len() as f64 * extend_ratio) as usize).await{
+        let recommended_songs = match song_recommender(query, (songs.len() as f64 * extend_ratio) as usize, *audio_state.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
                 println!("Error add_recommended_songs: {}", why);
@@ -229,6 +269,20 @@ impl AudioState{
         }*/
     }
 
+    pub async fn change_stream_type(audio_state: Arc<AudioState>, stream_type: &str) -> Result<bool, String>{
+        match stream_type.trim().to_lowercase().as_str() {
+            "online" => {
+                *audio_state.current_stream_type.lock().await = StreamType::Online;
+                Ok(true)
+            }
+            "loudnorm" => {
+                *audio_state.current_stream_type.lock().await = StreamType::Loudnorm;
+                Ok(true)
+            }
+            _ => Err("Invalid input, accepted args are 'online' and 'loudnorm'".to_string())
+        }
+    }
+
     pub async fn cleanup(audio_state: Arc<AudioState>) {
         audio_state.queue.cleanup().await;
     }
@@ -250,7 +304,12 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        AudioState::play_audio(self.audio_state.clone()).await;
+        AudioState::play_next_song(self.audio_state.clone());
+
+        let mut current_song = self.audio_state.current_song.lock().await;
+        *current_song = None;
+        let mut track_handle = self.audio_state.track_handle.lock().await;
+        *track_handle = None;
 
         None
     }

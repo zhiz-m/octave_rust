@@ -46,7 +46,7 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
     match audio_states.get(&guild_id) {
         Some(state) => {
             let state = state.clone();
-            AudioState::set_context(state.clone(), ctx, msg).await;
+            state.clone().set_context(ctx, msg).await;
             Some(state)
         }
         None => {
@@ -86,7 +86,7 @@ async fn remove_audio_state(ctx: &Context, msg: &Message) -> Result<(), String> 
     let mut audio_states = AUDIO_STATES.lock().await;
 
     if let Some(state) = audio_states.remove(&guild_id){
-        AudioState::cleanup(state).await;
+        state.cleanup().await;
         Ok(())
     }else{
         Err("bot is not currently active".to_string())
@@ -124,7 +124,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
         None => return Ok(())
     };
 
-    AudioState::add_audio(audio_state, query, false).await;
+    audio_state.add_audio(query, false).await;
 
     message_react(ctx, msg, "🎶").await;
 
@@ -141,7 +141,7 @@ async fn splay(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
         None => return Ok(())
     };
 
-    AudioState::add_audio(audio_state, query, true).await;
+    audio_state.add_audio(query, true).await;
 
     message_react(ctx, msg, "🔀").await;
     message_react(ctx, msg, "🎶").await;
@@ -171,7 +171,7 @@ async fn cure(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult{
         None => return Ok(())
     };
 
-    AudioState::add_recommended_songs(audio_state, &query, amount).await;
+    audio_state.add_recommended_songs(&query, amount).await;
 
     message_react(ctx, msg, "🍻").await;
     message_react(ctx, msg, "🎶").await;
@@ -201,7 +201,7 @@ async fn extend(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult{
         None => return Ok(())
     };
 
-    AudioState::extend_songs(audio_state, &query, extend_ratio).await;
+    audio_state.extend_songs(&query, extend_ratio).await;
 
     message_react(ctx, msg, "🍻").await;
     message_react(ctx, msg, "🎶").await;
@@ -217,7 +217,7 @@ async fn skip(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = AudioState::send_track_command(audio_state, TrackCommand::Stop).await {
+    if let Err(why) = audio_state.send_track_command(TrackCommand::Stop).await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     }else {
         message_react(ctx, msg, "↪").await;
@@ -233,7 +233,7 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = AudioState::send_track_command(audio_state, TrackCommand::Pause).await {
+    if let Err(why) = audio_state.send_track_command(TrackCommand::Pause).await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     }else {
         message_react(ctx, msg, "⏸").await;
@@ -249,7 +249,7 @@ async fn resume(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = AudioState::send_track_command(audio_state, TrackCommand::Play).await {
+    if let Err(why) = audio_state.send_track_command(TrackCommand::Play).await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     }else {
         message_react(ctx, msg, "▶").await;
@@ -265,7 +265,7 @@ async fn shuffle(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = AudioState::shuffle(audio_state).await {
+    if let Err(why) = audio_state.shuffle().await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     } else{
         message_react(ctx, msg, "🔀").await;
@@ -281,7 +281,7 @@ async fn clear(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = AudioState::clear(audio_state.clone()).await {
+    if let Err(why) = audio_state.clear().await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     } else{
         message_react(ctx, msg, "🗑").await;
@@ -299,7 +299,7 @@ async fn change_loop(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    match AudioState::change_looping(audio_state).await {
+    match audio_state.change_looping().await {
         Ok(true) => message_react(ctx, msg, "🔄").await,
         Ok(false) => message_react(ctx, msg, "➡").await,
         Err(why) => send_embed(ctx, msg, &format!("Error: {}", why)).await,
@@ -317,7 +317,7 @@ async fn stream_type(ctx: &Context, msg: &Message, args: Args) -> CommandResult{
         None => return Ok(())
     };
 
-    match AudioState::change_stream_type(audio_state, query).await {
+    match audio_state.change_stream_type(query).await {
         Ok(true) => message_react(ctx, msg, "✅").await,
         Err(why) => send_embed(ctx, msg, &format!("Error: {}", why)).await,
         _ => {}
@@ -333,7 +333,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    send_embed(ctx, msg,&AudioState::get_string(audio_state).await).await;
+    send_embed(ctx, msg,&audio_state.get_string().await).await;
 
     Ok(())
 }

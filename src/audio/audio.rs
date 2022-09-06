@@ -38,7 +38,7 @@ lazy_static! {
 }
 
 async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>> {
-    let guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
 
     let mut audio_states = AUDIO_STATES.lock().await;
@@ -80,7 +80,7 @@ async fn get_audio_state(ctx: &Context, msg: &Message) -> Option<Arc<AudioState>
 }
 
 async fn remove_audio_state(ctx: &Context, msg: &Message) -> Result<(), String> {
-    let guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
 
     let mut audio_states = AUDIO_STATES.lock().await;
@@ -233,7 +233,7 @@ async fn pause(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = audio_state.send_track_command(TrackCommand::Pause).await {
+    if let Err(why) = audio_state.pause_resume().await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     }else {
         message_react(ctx, msg, "⏸").await;
@@ -249,7 +249,7 @@ async fn resume(ctx: &Context, msg: &Message) -> CommandResult{
         None => return Ok(())
     };
 
-    if let Err(why) = audio_state.send_track_command(TrackCommand::Play).await {
+    if let Err(why) = audio_state.pause_resume().await {
         send_embed(ctx, msg, &format!("Error: {}", why)).await;
     }else {
         message_react(ctx, msg, "▶").await;

@@ -1,5 +1,5 @@
 use std::{
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
     mem::drop,
 };
 use rand::seq::SliceRandom;
@@ -12,9 +12,8 @@ use super::{
         process_query,
         song_recommender,
     },
-    subprocess::get_pcm_reader, work::StreamType,
+    subprocess::get_pcm_reader, work::StreamType, message_ui_component::MessageUiComponent,
 };
-use crate::util::send_embed_http;
 use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent, 
     input::{
         self,
@@ -38,7 +37,6 @@ use serenity::{
     prelude::{
         Mutex as SerenityMutex,
     },
-    http::Http,
     client::Context,
     model::{
         id::ChannelId,
@@ -55,9 +53,12 @@ pub struct AudioState{
     is_looping: Mutex<bool>,
     song_ready: Semaphore,
     current_stream_type: Mutex<StreamType>,
+    is_paused: AtomicBool,
 
     channel_id: Mutex<ChannelId>,
-    http: Mutex<Arc<Http>>,
+    context: Mutex<Arc<Context>>,
+
+    message_ui_component: Mutex<Option<MessageUiComponent>>,
 }
 
 impl AudioState{
@@ -70,9 +71,12 @@ impl AudioState{
             is_looping: Mutex::new(false),
             song_ready: Semaphore::new(1),
             current_stream_type: Mutex::new(StreamType::Online),
+            is_paused: AtomicBool::new(false),
 
             channel_id: Mutex::new(msg.channel_id),
-            http: Mutex::new(ctx.http.clone()),
+            context: Mutex::new(Arc::new(ctx.clone())),
+
+            message_ui_component: Mutex::new(None),
         };
         let audio_state = Arc::new(audio_state);
         {
@@ -90,8 +94,8 @@ impl AudioState{
             *channel_id = msg.channel_id;
         }
         {
-            let mut http = self.http.lock().await;
-            *http = ctx.http.clone();
+            let mut context = self.context.lock().await;
+            *context = Arc::new(ctx.clone());
         }
     }
 
@@ -158,10 +162,16 @@ impl AudioState{
             {
                 let text = song.get_string().await;
                 let channel_id = self.channel_id.lock().await;
-                let http = self.http.lock().await;
-                send_embed_http(*channel_id, http.clone(), &format!(
+                let context = self.context.lock().await;
+                /*send_embed_http(*channel_id, http.clone(), &format!(
                     "Now playing:\n\n {}", text
-                )).await;
+                )).await;*/
+                let mut ptr = self.message_ui_component.lock().await;
+                let mut component = MessageUiComponent::new(self.clone(), channel_id.clone(), context.clone());
+                if let Err(why) = component.start(text).await{
+                    println!("Err AudioState::play_audio: {:?}", why);
+                }
+                *ptr = Some(component);
             }
             let mut current_song = self.current_song.lock().await;
             *current_song = Some(song);
@@ -229,6 +239,17 @@ impl AudioState{
                 }
             },
             None => Err("no song currently playing".to_string())
+        }
+    }
+
+    pub async fn pause_resume(self: Arc<Self>) -> Result<(), String>{
+        let prev = self.is_paused.fetch_xor(true, Ordering::Relaxed);
+        // not paused previously
+        if prev {
+            self.send_track_command(TrackCommand::Play).await
+        }
+        else{
+            self.send_track_command(TrackCommand::Pause).await
         }
     }
 

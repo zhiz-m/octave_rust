@@ -1,17 +1,15 @@
 use rspotify::{
-    client::{
-        Spotify,
-        SpotifyBuilder,
-    },
+    ClientCredsSpotify,
+    clients::BaseClient,
+    Credentials,
     model::{
         Id,
         PlayableItem,
         Market,
         Country,
         FullTrack,
-        SimplifiedTrack,
+        SimplifiedTrack, PlaylistId, AlbumId, ArtistId, TrackId,
     },
-    oauth2::CredentialsBuilder,
 };
 
 use rand::{
@@ -69,40 +67,29 @@ impl TrackObject{
             TrackObject::SimplifiedTrack(track) => track.duration.as_secs(),
         }
     }
-    fn album_id(&self) -> Option<&str>{
+    fn album_id(&self) -> Option<&AlbumId>{
         match self{
-            TrackObject::FullTrack(track) => track.album.id.as_deref(),
+            TrackObject::FullTrack(track) => track.album.id.as_ref(),
             TrackObject::SimplifiedTrack(_) => None,
         }
     }
-    fn artist_id(&self) -> Option<&str>{
+    fn artist_id(&self) -> Option<&ArtistId>{
         match self{
-            TrackObject::FullTrack(track) => track.artists[0].id.as_deref(),
-            TrackObject::SimplifiedTrack(track) => track.artists[0].id.as_deref(),
+            TrackObject::FullTrack(track) => track.artists[0].id.as_ref(),
+            TrackObject::SimplifiedTrack(track) => track.artists[0].id.as_ref(),
         }
     }
 }
 
 pub struct SpotifyClient{
-    client: Spotify,
+    client: ClientCredsSpotify,
 }
 
 impl SpotifyClient{
     pub async fn new() -> Result<SpotifyClient, String> {
-        let creds = CredentialsBuilder::default()
-            .id("5f573c9620494bae87890c0f08a60293")
-            .secret("212476d9b0f3472eaa762d90b19b0ba8")
-            .build();
-        let creds = match creds{
-            Ok(creds) => creds,
-            Err(why) => return Err(why.to_string()),
-        };
-        let mut spotify = SpotifyBuilder::default()
-            .credentials(creds)
-            //.oauth(oauth)
-            .build()
-            .unwrap();
-        if let Err(why) = spotify.request_client_token().await{
+        let creds = Credentials::new("5f573c9620494bae87890c0f08a60293", "212476d9b0f3472eaa762d90b19b0ba8");
+        let mut spotify = ClientCredsSpotify::new(creds);
+        if let Err(why) = spotify.request_token().await{
             return Err(why.to_string());
         };
         Ok(SpotifyClient{
@@ -129,14 +116,14 @@ impl SpotifyClient{
         songs
     }
     pub async fn get_playlist(&self, playlist_id: &str) -> Result<Vec<TrackObject>, String>{
-        let playlist_id = Id::from_id(playlist_id);
+        let playlist_id = PlaylistId::from_id(playlist_id);
         let playlist_id = match playlist_id{
             Ok(playlist_id) => playlist_id,
             Err(why) => {
                 return Err(format!("spotify::get_playlist: {:?}", why));
             }
         };
-        let tracks = self.client.playlist(playlist_id, None, None).await;
+        let tracks = self.client.playlist(&playlist_id, None, None).await;
         let tracks = match tracks{
             Ok(tracks) => tracks,
             Err(why)=>{
@@ -157,14 +144,14 @@ impl SpotifyClient{
         Ok(tracks)
     }
     pub async fn get_track(&self, track_id: &str) -> Result<TrackObject, String>{
-        let track_id = Id::from_id(track_id);
+        let track_id = TrackId::from_id(track_id);
         let track_id = match track_id{
             Ok(track_id) => track_id,
             Err(why) => {
                 return Err(format!("spotify::get_track: {:?}", why));
             }
         };
-        let track = self.client.track(track_id).await;
+        let track = self.client.track(&track_id).await;
         let track = match track{
             Ok(track) => track,
             Err(why)=>{
@@ -174,14 +161,7 @@ impl SpotifyClient{
         };
         Ok(TrackObject::FullTrack(track))
     }
-    async fn random_from_artist(&self, id: &str) -> Option<TrackObject>{
-        let id = match Id::from_id(id){
-            Ok(id) => id,
-            Err(why) => {
-                println!("Error {:?}",why);
-                return None;
-            }
-        };
+    async fn random_from_artist(&self, id: &ArtistId) -> Option<TrackObject>{
         let tracks = self.client.artist_top_tracks(id, &Market::Country(Country::Japan)).await;
         match tracks {
             Ok(tracks) => Some(TrackObject::FullTrack(tracks.into_iter().choose(&mut rand::thread_rng())?)),
@@ -191,14 +171,7 @@ impl SpotifyClient{
             },
         }
     }
-    async fn random_from_album(&self, id: &str) -> Option<TrackObject>{
-        let id = match Id::from_id(id){
-            Ok(id) => id,
-            Err(why) => {
-                println!("Error {:?}",why);
-                return None;
-            }
-        };
+    async fn random_from_album(&self, id: &AlbumId) -> Option<TrackObject>{
         let album = self.client.album(id).await;
         match album {
             Ok(album) => {
@@ -258,8 +231,7 @@ impl SpotifyClient{
                                 Some(artist) => artist,
                                 None => return None,
                             };
-                            let id = Id::from_id(artist).unwrap();
-                            let artists = client.client.artist_related_artists(id).await;
+                            let artists = client.client.artist_related_artists(artist).await;
                             let artists = match artists{
                                 Ok(artists) => artists[..5].to_vec(),
                                 Err(why) => {

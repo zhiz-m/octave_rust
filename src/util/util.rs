@@ -40,8 +40,7 @@ pub async fn send_embed_http(channel_id: ChannelId, http: Arc<Http>, text: &str)
             e.colour(0xf542bf);
             e.description(text);
             e
-        });
-        m
+        })
     }).await;
 
     if let Err(why) = res{

@@ -2,7 +2,7 @@ use std::env;
 use audio::config;
 use serenity::{async_trait, client::{Client, Context, EventHandler}, framework::{
         StandardFramework,
-    }, model::gateway::Ready};
+    }, model::gateway::Ready, prelude::GatewayIntents};
 
 use songbird::{
     SerenityInit,
@@ -31,7 +31,9 @@ async fn main() {
         })
         .group(&audio::AUDIO_GROUP);
     
-    let mut client = Client::builder(token)
+    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_VOICE_STATES | GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILDS;
+
+    let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .framework(framework)
         .register_songbird()

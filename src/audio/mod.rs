@@ -9,5 +9,6 @@ mod subprocess;
 mod work;
 mod spotify;
 mod song_searcher;
+mod message_ui_component;
 
 pub use audio::*;

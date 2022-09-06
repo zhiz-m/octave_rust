@@ -1,12 +1,13 @@
 use std::{io::{
         BufReader, 
         Read, 
-        Write,
+        Write, Seek,
     }, mem::drop, process::{
         Command,
         Stdio,
-        ChildStdin,
-    }, str, sync::Arc, time::{Duration, Instant}};
+        ChildStdin, ChildStdout,
+    }, str, time::Instant};
+use songbird::input::reader::MediaSource;
 use tokio::{io::AsyncWriteExt, process::Command as TokioCommand};
 use super::work::StreamType;
 
@@ -24,6 +25,40 @@ pub struct PcmReaderConfig{
     volume_delta: Option<f64>,
     stream_type: StreamType,
     src_url: String
+}
+
+pub struct BufReaderSeek<T: Read>{
+    inner: BufReader<T>,
+}
+
+impl <T: Read + Send> BufReaderSeek<T>{
+    pub fn new(inner: BufReader<T>) -> BufReaderSeek<T>{
+        BufReaderSeek { 
+            inner 
+        }
+    }
+}
+
+impl <T: Read + Send + Sync> MediaSource for BufReaderSeek<T>{
+    fn is_seekable(&self) -> bool {
+        false
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
+}
+
+impl <T: Read> Seek for BufReaderSeek<T>{
+    fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
+        Err(std::io::Error::new(std::io::ErrorKind::Other, "seek not supported"))
+    }
+}
+
+impl <T: Read> Read for BufReaderSeek<T>{
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
 }
 
 pub async fn get_pcm_reader_config(youtube_url: &str, stream_type: StreamType) -> Result<PcmReaderConfig, String>{
@@ -274,7 +309,7 @@ fn ffmpeg_pcm_loudnorm(buf: Vec<u8>, loudnorm: LoudnormConfig) -> Result<Box<dyn
 }
 
 // for loudnorm, requires existing, downloaded buffer
-pub async fn get_pcm_reader(config: PcmReaderConfig) -> Result<Box<dyn Read + Send>, String>{
+pub async fn get_pcm_reader(config: PcmReaderConfig) -> Result<Box<dyn MediaSource + Send>, String>{
     let mut cmd = Command::new("ffmpeg");
     //println!("get_pcm_reader src_url: ");
     let cmd = match config.stream_type {
@@ -332,12 +367,12 @@ pub async fn get_pcm_reader(config: PcmReaderConfig) -> Result<Box<dyn Read + Se
         None => return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string()),
     };
     let buf = BufReader::with_capacity(16384*32, stdout);
-    let buf: Box<dyn Read + Send> = Box::new(buf);
+    let buf = Box::new(BufReaderSeek::<ChildStdout>::new(buf));
     Ok(buf)
 }
 
 // streams live from youtube
-pub fn ffmpeg_pcm(url: String) -> Result<Box<dyn Read + Send>, String>{
+pub fn ffmpeg_pcm(url: String) -> Result<Box<dyn MediaSource + Send>, String>{
     /*let res = tokio::task::spawn_blocking(move ||{
         
     }).await.unwrap();
@@ -367,7 +402,7 @@ pub fn ffmpeg_pcm(url: String) -> Result<Box<dyn Read + Send>, String>{
         None => return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string()),
     };
     let buf = BufReader::with_capacity(16384*32, out);
-    let buf: Box<dyn Read + Send> = Box::new(buf);
+    let buf = Box::new(BufReaderSeek::<ChildStdout>::new(buf));
     Ok(buf)
 }
 

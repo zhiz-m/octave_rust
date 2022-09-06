@@ -11,4 +11,5 @@ pub mod audio {
     pub const TIMEOUT_DURATION: Duration = Duration::from_millis(600000);
     pub const AUDIO_NORM_DB: i32 = -10;
     pub const BOT_PREFIX: &str = "o."; 
+    pub const MESSAGE_UI_COMPONENT_PROCESING_INTERVAL_MS: u64 = 500;
 }

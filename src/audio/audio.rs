@@ -28,7 +28,7 @@ use crate::util::{
 };
 
 #[group]
-#[commands(join,disconnect,play,splay,cure,extend,skip,pause,resume,change_loop,shuffle,clear,queue,stream_type)]
+#[commands(join,disconnect,play,splay,cure,extend,skip,pause,resume,change_loop,shuffle,clear,queue,stream_type,ui)]
 struct Audio;
 
 lazy_static! {
@@ -91,6 +91,18 @@ async fn remove_audio_state(ctx: &Context, msg: &Message) -> Result<(), String> 
     }else{
         Err("bot is not currently active".to_string())
     }
+}
+
+#[command]
+#[aliases("menu")]
+async fn ui(ctx: &Context, msg: &Message) -> CommandResult{
+    let audio_state = get_audio_state(ctx, msg).await;
+    if let Some(audio_state) = audio_state{
+        message_react(ctx, msg, "🥳").await;
+        audio_state.display_ui().await;
+    }
+
+    Ok(())
 }
 
 #[command]

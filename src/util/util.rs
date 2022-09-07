@@ -5,7 +5,7 @@ use serenity::{
         prelude::ReactionType,
         id::ChannelId,
     },
-    http::Http,
+    http::Http, builder::CreateEmbed,
 };
 
 use std::sync::Arc;
@@ -20,13 +20,15 @@ pub async fn send_message(ctx: &Context, msg: &Message, text: &str){
     };
 }
 
+pub fn get_styled_embed<'a>(e: &'a mut CreateEmbed, text: &str) -> &'a mut CreateEmbed {
+    e.colour(0xf542bf);
+    e.description(text);
+    e
+}
+
 pub async fn send_embed(ctx: &Context, msg: &Message, text: &str){
     let res = msg.channel_id.send_message(&ctx.http, |m| {
-        m.embed(|e| {
-            e.colour(0xf542bf);
-            e.description(text);
-            e
-        });
+        m.embed(|e| get_styled_embed(e, text));
         m
     }).await;
     if let Err(why) = res{

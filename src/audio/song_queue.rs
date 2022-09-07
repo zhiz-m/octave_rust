@@ -66,11 +66,15 @@ impl SongQueue{
         Ok(())
     }
     pub async fn clear(&self) -> Result<(), String>{
-        let mut queue = self.queue.lock().await;
+        while self.queue_sem.available_permits() > 0{
+            self.pop().await;
+        }
+        self.reset_loader().await;
+        /*let mut queue = self.queue.lock().await;
         if queue.len() == 0 {
             return Err("queue is empty".to_string());
         };
-        queue.clear();
+        queue.clear();*/
         Ok(())
     }
     async fn reset_loader(&self) {

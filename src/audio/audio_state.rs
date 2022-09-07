@@ -3,6 +3,8 @@ use std::{
     mem::drop,
 };
 use rand::seq::SliceRandom;
+use crate::util::send_embed_http;
+
 use super::{
     song_queue::SongQueue,
     song::{
@@ -81,14 +83,14 @@ impl AudioState{
         let audio_state = Arc::new(audio_state);
         {
             let audio_state = audio_state.clone();
-            tokio::spawn(async {
+            tokio::spawn(async move {
                 audio_state.play_audio_loop().await;
             });
         }
         audio_state
     }
 
-    pub async fn set_context(self: Arc<Self>, ctx: &Context, msg: &Message){
+    pub async fn set_context(self: &Arc<Self>, ctx: &Context, msg: &Message){
         {
             let mut channel_id = self.channel_id.lock().await;
             *channel_id = msg.channel_id;
@@ -99,7 +101,7 @@ impl AudioState{
         }
     }
 
-    async fn play_audio_loop(self: Arc<Self>){
+    async fn play_audio_loop(self: &Arc<Self>){
         loop{
             match timeout(audio_config::TIMEOUT_DURATION, self.clone().song_ready.acquire()).await {
                 Ok(x) => {
@@ -162,17 +164,16 @@ impl AudioState{
             {
                 let text = song.get_string().await;
                 let channel_id = self.channel_id.lock().await;
+
                 let context = self.context.lock().await;
-                /*send_embed_http(*channel_id, http.clone(), &format!(
+
+                send_embed_http(channel_id.clone(), context.http.clone(), &format!(
                     "Now playing:\n\n {}", text
-                )).await;*/
-                let mut ptr = self.message_ui_component.lock().await;
-                let mut component = MessageUiComponent::new(self.clone(), channel_id.clone(), context.clone());
-                if let Err(why) = component.start(text).await{
-                    println!("Err AudioState::play_audio: {:?}", why);
-                }
-                *ptr = Some(component);
+                )).await;
             }
+            
+            self.display_ui().await;
+            
             let mut current_song = self.current_song.lock().await;
             *current_song = Some(song);
             let mut track_handle = self.track_handle.lock().await;
@@ -180,11 +181,24 @@ impl AudioState{
         }
     }
 
-    pub fn play_next_song(self: Arc<Self>){
+    pub async fn display_ui(self: &Arc<Self>){
+        let channel_id = self.channel_id.lock().await;
+
+        let context = self.context.lock().await;
+
+        let mut ptr = self.message_ui_component.lock().await;
+        let mut component = MessageUiComponent::new(self.clone(), channel_id.clone(), context.clone());
+        if let Err(why) = component.start().await{
+            println!("Err AudioState::play_audio: {:?}", why);
+        }
+        *ptr = Some(component);
+    }
+
+    pub fn play_next_song(self: &Arc<Self>){
         self.song_ready.add_permits(1);
     }
 
-    pub async fn add_audio(self: Arc<Self>, query: &str, shuffle: bool){
+    pub async fn add_audio(self: &Arc<Self>, query: &str, shuffle: bool){
         let mut songs = match process_query(query, *self.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
@@ -198,7 +212,7 @@ impl AudioState{
         self.queue.push(songs).await;
     }
 
-    pub async fn add_recommended_songs(self: Arc<Self>, query: &str, amount: usize){
+    pub async fn add_recommended_songs(self: &Arc<Self>, query: &str, amount: usize){
         let songs = match song_recommender(query, amount, *self.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
@@ -209,7 +223,7 @@ impl AudioState{
         self.queue.push(songs).await;
     }
 
-    pub async fn extend_songs(self: Arc<Self>, query: &str, extend_ratio: f64){
+    pub async fn extend_songs(self: &Arc<Self>, query: &str, extend_ratio: f64){
         let mut songs = match process_query(query, *self.current_stream_type.lock().await).await{
             Ok(songs) => songs,
             Err(why) => {
@@ -229,7 +243,7 @@ impl AudioState{
         self.queue.push(songs).await;
     }
 
-    pub async fn send_track_command(self: Arc<Self>, cmd: TrackCommand) -> Result<(), String>{
+    pub async fn send_track_command(self: &Arc<Self>, cmd: TrackCommand) -> Result<(), String>{
         let track_handle = self.track_handle.lock().await;
         match track_handle.as_ref() {
             Some(track_handle) => {
@@ -242,7 +256,7 @@ impl AudioState{
         }
     }
 
-    pub async fn pause_resume(self: Arc<Self>) -> Result<(), String>{
+    pub async fn pause_resume(self: &Arc<Self>) -> Result<(), String>{
         let prev = self.is_paused.fetch_xor(true, Ordering::Relaxed);
         // not paused previously
         if prev {
@@ -253,16 +267,16 @@ impl AudioState{
         }
     }
 
-    pub async fn shuffle(self: Arc<Self>) -> Result<(), String>{
+    pub async fn shuffle(self: &Arc<Self>) -> Result<(), String>{
         self.queue.shuffle().await
     }
 
-    pub async fn clear(self: Arc<Self>) -> Result<(), String>{
+    pub async fn clear(self: &Arc<Self>) -> Result<(), String>{
         self.queue.clear().await
     }
 
     // on success, returns a bool that specifies whether the queue is now being looped
-    pub async fn change_looping(self: Arc<Self>) -> Result<bool, String>{
+    pub async fn change_looping(self: &Arc<Self>) -> Result<bool, String>{
         {
             let current_song = self.current_song.lock().await;
             if current_song.is_none() {
@@ -290,7 +304,7 @@ impl AudioState{
         }*/
     }
 
-    pub async fn change_stream_type(self: Arc<Self>, stream_type: &str) -> Result<bool, String>{
+    pub async fn change_stream_type(self: &Arc<Self>, stream_type: &str) -> Result<bool, String>{
         match stream_type.trim().to_lowercase().as_str() {
             "online" => {
                 *self.current_stream_type.lock().await = StreamType::Online;
@@ -304,11 +318,11 @@ impl AudioState{
         }
     }
 
-    pub async fn cleanup(self: Arc<Self>) {
+    pub async fn cleanup(self: &Arc<Self>) {
         self.queue.cleanup().await;
     }
 
-    pub async fn get_string(self: Arc<Self>) -> String {
+    pub async fn get_string(self: &Arc<Self>) -> String {
         let current_song = self.current_song.lock().await;
         let current_song = match &*current_song {
             Some(song) => song.get_string().await,
@@ -325,7 +339,7 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        self.audio_state.clone().play_next_song();
+        self.audio_state.play_next_song();
 
         let mut current_song = self.audio_state.current_song.lock().await;
         *current_song = None;

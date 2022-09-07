@@ -2,13 +2,13 @@ pub mod audio;
 pub mod audio_state;
 pub mod config;
 
+mod message_ui_component;
 mod song;
-mod youtube_loader;
 mod song_queue;
+mod song_searcher;
+mod spotify;
 mod subprocess;
 mod work;
-mod spotify;
-mod song_searcher;
-mod message_ui_component;
+mod youtube_loader;
 
 pub use audio::*;

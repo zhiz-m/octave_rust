@@ -94,6 +94,14 @@ impl MessageUiComponent {
                                     .label("Play/Pause")
                                     .to_owned(),
                             )
+                            .add_button(
+                                CreateButton::default()
+                                    .custom_id("loop")
+                                    .emoji('🔁')
+                                    .style(ButtonStyle::Secondary)
+                                    .label("Loop")
+                                    .to_owned(),
+                            )
                             .to_owned(),
                     )
                     .add_action_row(
@@ -258,6 +266,14 @@ impl MessageUiComponent {
             }
             "clear" => {
                 audio_state.clear().await?;
+                response = mci
+                    .create_interaction_response(context, |r| {
+                        r.kind(InteractionResponseType::DeferredUpdateMessage)
+                    })
+                    .await;
+            }
+            "loop" => {
+                audio_state.change_looping().await?;
                 response = mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::DeferredUpdateMessage)

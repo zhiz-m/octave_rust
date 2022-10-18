@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::SystemTime,
 };
 
 use super::config::audio as audio_config;
@@ -128,7 +129,7 @@ impl AudioState {
                 Some(buf) => buf,
                 None => {
                     println!("AudioState::play_audio: no song buffer found");
-                    self.clone().play_next_song();
+                    self.play_next_song();
                     continue;
                 }
             };
@@ -137,7 +138,7 @@ impl AudioState {
                 Ok(source) => source,
                 Err(why) => {
                     println!("Error in AudioState::play_audio: {}", why);
-                    self.clone().play_next_song();
+                    self.play_next_song();
                     continue;
                 }
             };
@@ -345,6 +346,7 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        println!("song ended, {:?}", SystemTime::now());
         self.audio_state.play_next_song();
 
         let mut current_song = self.audio_state.current_song.lock().await;

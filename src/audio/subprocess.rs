@@ -25,7 +25,7 @@ pub struct PcmReaderConfig {
     src_url: String,
 }
 
-pub struct BufReaderSeek<T: Read> {
+pub struct BufReaderSeek<T: Read + Send> {
     inner: BufReader<T>,
 }
 
@@ -45,7 +45,7 @@ impl<T: Read + Send + Sync> MediaSource for BufReaderSeek<T> {
     }
 }
 
-impl<T: Read> Seek for BufReaderSeek<T> {
+impl<T: Read + Send> Seek for BufReaderSeek<T> {
     fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -54,7 +54,7 @@ impl<T: Read> Seek for BufReaderSeek<T> {
     }
 }
 
-impl<T: Read> Read for BufReaderSeek<T> {
+impl<T: Read + Send> Read for BufReaderSeek<T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.inner.read(buf)
     }

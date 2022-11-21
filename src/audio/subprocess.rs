@@ -101,17 +101,17 @@ async fn ytdl(query: &str) -> String {
 /*
 async fn download_audio(mut url: String) -> Result<Vec<u8>, String> {
     url.pop();
-    println!("url: {}", url);
+    info!("url: {}", url);
     let now = Instant::now();
     let mut cmd = TokioCommand::new("curl");
     let cmd = cmd
         .arg(url)
         .stderr(Stdio::null());
     let res = cmd.output().await;
-    println!("audio downloaded, time: {:?}", now.elapsed());
+    info!("audio downloaded, time: {:?}", now.elapsed());
     match res{
         Ok(out) => {
-            println!("stderr: {}", str::from_utf8(&out.stderr).unwrap());
+            info!("stderr: {}", str::from_utf8(&out.stderr).unwrap());
             Ok(out.stdout)
         },
         Err(why) => Err(why.to_string()),
@@ -136,7 +136,7 @@ async fn download_audio_buf(url: String) -> Result<Vec<u8>, String> {
         .output()
         .await
         .unwrap();
-    println!("audio downloaded, time: {:?}", now.elapsed());
+    log::info!("audio downloaded, time: {:?}", now.elapsed());
     Ok(out.stdout)
 }
 
@@ -164,7 +164,7 @@ async fn get_loudnorm_params(buf: &[u8]) -> Result<LoudnormConfig, String> {
     };
     let stdin = child.stdin.as_mut().unwrap();
     if let Err(x) = stdin.write_all(buf).await {
-        println!("Warning: subprocess::get_loudnorm_params error: {}", x);
+        log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
     };
 
     let out = match child.wait_with_output().await {
@@ -227,11 +227,9 @@ async fn ffmpeg_get_volume(buf: &[u8]) -> Result<f64, String> {
         Err(why) => return Err(why.to_string()),
     };
     let stdin = child.stdin.as_mut().unwrap();
-    /*if let Err(why) = stdin.write_all(buf){
-        return Err(why.to_string());
-    };*/
+
     if let Err(why) = stdin.write_all(buf).await {
-        println!("warning: subprocess::ffmpeg_get_volume error: {}", why);
+        log::warn!("warning: subprocess::ffmpeg_get_volume error: {}", why);
     };
 
     let out = match child.wait_with_output().await {
@@ -243,8 +241,6 @@ async fn ffmpeg_get_volume(buf: &[u8]) -> Result<f64, String> {
         Ok(out) => out,
         Err(why) => return Err(why.to_string()),
     };
-
-    //println!("output: {}", out);
 
     let split = match out.split("max_volume: ").nth(1) {
         Some(split) => split,
@@ -259,7 +255,7 @@ async fn ffmpeg_get_volume(buf: &[u8]) -> Result<f64, String> {
 
 fn pipe_stdin(buf: &[u8], mut pipe: ChildStdin) {
     if let Err(x) = pipe.write_all(buf) {
-        println!("Warning: subprocess::pipe_stdin error: {}", x);
+        log::warn!("Warning: subprocess::pipe_stdin error: {}", x);
     };
 }
 
@@ -292,7 +288,7 @@ async fn ffmpeg_loudnorm_convert(
     };
     let stdin = child.stdin.as_mut().unwrap();
     if let Err(x) = stdin.write_all(&buf).await {
-        println!("Warning: subprocess::get_loudnorm_params error: {}", x);
+        log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
     };
 
     let out = match child.wait_with_output().await {
@@ -357,7 +353,6 @@ pub async fn get_pcm_reader(
     config: PcmReaderConfig,
 ) -> Result<Box<dyn MediaSource + Send>, String> {
     let mut cmd = Command::new("ffmpeg");
-    //println!("get_pcm_reader src_url: ");
     let cmd = match config.stream_type {
         StreamType::Online => {
             cmd.arg("-reconnect")

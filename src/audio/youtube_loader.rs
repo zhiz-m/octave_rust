@@ -1,4 +1,5 @@
 use super::{subprocess::get_pcm_reader_config, work::Work};
+use anyhow::anyhow;
 use tokio::sync::mpsc;
 
 pub struct YoutubeLoader {
@@ -7,24 +8,15 @@ pub struct YoutubeLoader {
 }
 
 impl YoutubeLoader {
-    pub async fn add_work(&self, work: Work) {
-        if let Err(err) = self.work.send(work).await {
-            println!("Error in Loader::add_work: {}", err);
-        };
+    pub async fn add_work(&self, work: Work) -> anyhow::Result<()> {
+        self.work.send(work).await.map_err(|e|anyhow!(e.to_string()))?;
+        Ok(())
     }
-    async fn loader_loop(mut work: mpsc::Receiver<Work>) {
+    async fn loader_loop(mut work: mpsc::Receiver<Work>) -> anyhow::Result<()> {
         while let Some(work) = work.recv().await {
-            let buf_config = match get_pcm_reader_config(&work.query, work.stream_type).await {
-                Ok(buf) => Some(buf),
-                Err(why) => {
-                    println!("Error in Loader::loader_loop: {:?}", why);
-                    None
-                }
-            };
+            let buf_config = get_pcm_reader_config(&work.query, work.stream_type).await.map_err(|e|anyhow!(e.to_string()))?;
 
-            if let Err(why) = work.sender.send(buf_config).await {
-                println!("Error in Loader::loader_loop: {}", why);
-            };
+            work.sender.send(Some(buf_config)).await.map_err(|e|anyhow!(e.to_string()))?;
 
             {
                 let mut is_loaded = work.is_loaded.lock().await;
@@ -32,12 +24,12 @@ impl YoutubeLoader {
                 *is_loaded = true;
             }
         }
+        Ok(())
     }
 
-    pub async fn cleanup(&mut self) {
-        if let Err(why) = self.kill.send(()).await {
-            println!("Error on Loader::cleanup: {}", why);
-        };
+    pub async fn cleanup(&mut self) -> anyhow::Result<()> {
+        self.kill.send(()).await.map_err(|e|anyhow!(e.to_string()))?;
+        Ok(())
     }
 
     pub fn new() -> YoutubeLoader {

@@ -8,22 +8,9 @@ use std::{
 };
 
 use crate::{config::audio::MESSAGE_UI_COMPONENT_CHAIN_INTERVAL_MS, util::get_styled_embed};
+use anyhow::Context as AContext;
 use futures::StreamExt;
-use serenity::{
-    builder::{
-        CreateActionRow, CreateButton, CreateEmbed, CreateInputText, CreateSelectMenu,
-        CreateSelectMenuOption,
-    },
-    model::prelude::{
-        component::{ActionRowComponent, ButtonStyle, InputTextStyle},
-        interaction::{
-            message_component::MessageComponentInteraction, modal::ModalSubmitInteraction,
-            InteractionResponseType,
-        },
-        ChannelId, Message, UserId,
-    },
-    prelude::Context,
-};
+use poise::serenity_prelude::{Message, ChannelId, Context, UserId, CreateActionRow, CreateButton, ButtonStyle, CreateSelectMenu, CreateSelectMenuOption, MessageComponentInteraction, InteractionResponseType, ModalSubmitInteraction, ActionRowComponent, CreateEmbed, CreateInputText, InputTextStyle};
 use songbird::tracks::TrackCommand;
 use tokio::{sync::Mutex, time::timeout};
 
@@ -163,7 +150,7 @@ impl MessageUiComponent {
         let m = match self.message.as_ref() {
             Some(m) => Arc::new(m.clone()),
             None => {
-                println!("error in interaction_loop: ui message is empty");
+                log::error!("error in interaction_loop: ui message is empty");
                 return;
             }
         };
@@ -195,7 +182,7 @@ impl MessageUiComponent {
                         )
                         .await
                         {
-                            println!("error in interaction_loop: {}", why);
+                            log::error!("error in interaction_loop: {}", why);
                         }
                     }
 
@@ -204,7 +191,7 @@ impl MessageUiComponent {
                     }
                 }
                 if let Err(why) = m.delete(&context.http).await {
-                    println!("error in interaction_loop: {}", why);
+                    log::error!("error in interaction_loop: {}", why);
                 };
             });
         }
@@ -235,7 +222,7 @@ impl MessageUiComponent {
                         )
                         .await
                         {
-                            println!("error in interaction_loop: {}", why);
+                            log::error!("error in interaction_loop: {}", why);
                         }
                     }
                     if should_cleanup.load(Ordering::Relaxed) {
@@ -251,42 +238,41 @@ impl MessageUiComponent {
         context: &Arc<Context>,
         user_state_map: &Arc<Mutex<HashMap<UserId, UserState>>>,
         audio_state: &Arc<AudioState>,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let id = mci.data.custom_id.as_str();
-        let response;
 
         match id {
             "skip" => {
                 audio_state.send_track_command(TrackCommand::Stop).await?;
-                response = mci
+                mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::DeferredUpdateMessage)
                     })
-                    .await;
+                    .await?;
             }
             "clear" => {
                 audio_state.clear().await?;
-                response = mci
+                mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::DeferredUpdateMessage)
                     })
-                    .await;
+                    .await?;
             }
             "loop" => {
-                audio_state.change_looping().await?;
-                response = mci
+                audio_state.change_looping(None).await?;
+                mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::DeferredUpdateMessage)
                     })
-                    .await;
+                    .await?;
             }
             "play_pause" => {
-                audio_state.pause_resume().await?;
-                response = mci
+                audio_state.pause_resume(None).await?;
+                mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::DeferredUpdateMessage)
                     })
-                    .await;
+                    .await?;
             }
             "shuffle_selection" => {
                 let selections = &mci.data.values;
@@ -296,19 +282,19 @@ impl MessageUiComponent {
                     Entry::Occupied(e) => e.into_mut(),
                     Entry::Vacant(e) => e.insert(UserState::default()),
                 };
-                match selections.iter().next().ok_or("no selections")?.as_str() {
+                match selections.iter().next().context("no selections")?.as_str() {
                     "t" => user_state.should_shuffle = true,
                     "f" => user_state.should_shuffle = false,
                     _ => unreachable!(),
                 };
-                response = mci
+                mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::DeferredUpdateMessage)
                     })
-                    .await;
+                    .await?;
             }
             "add_songs" => {
-                response = mci.create_interaction_response(context, |r| {
+                mci.create_interaction_response(context, |r| {
                     r.kind(InteractionResponseType::Modal)
                         .interaction_response_data(|d| {
                             d
@@ -330,11 +316,11 @@ impl MessageUiComponent {
                                 )
                             })
                         })
-                }).await;
+                }).await?;
             }
             "queue" => {
                 let text = audio_state.get_string().await;
-                response = mci
+                mci
                     .create_interaction_response(context, |r| {
                         r.kind(InteractionResponseType::ChannelMessageWithSource)
                             .interaction_response_data(move |d| {
@@ -343,12 +329,11 @@ impl MessageUiComponent {
                                 )
                             })
                     })
-                    .await;
+                    .await?;
                 audio_state.display_ui().await;
             }
             _ => unreachable!(),
         };
-        response.map_err(|e| e.to_string())?;
         Ok(())
     }
 

@@ -3,6 +3,7 @@ use super::{
     work::Work,
     youtube_loader::YoutubeLoader,
 };
+use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use std::{cmp::min, collections::VecDeque, mem::drop, sync::Arc};
 use tokio::sync::{Mutex, Semaphore};
@@ -45,10 +46,10 @@ impl SongQueue {
             .pop_front()
             .expect("Error SongQueue.pop: semaphore sync failure")
     }
-    pub async fn shuffle(&self) -> Result<(), String> {
+    pub async fn shuffle(&self) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().await;
         if queue.len() == 0 {
-            return Err("queue is empty".to_string());
+            return Err(anyhow!("queue is empty"));
         }
         queue.make_contiguous().shuffle(&mut rand::thread_rng());
 
@@ -63,7 +64,7 @@ impl SongQueue {
 
         Ok(())
     }
-    pub async fn clear(&self) -> Result<(), String> {
+    pub async fn clear(&self) -> anyhow::Result<()> {
         while self.queue_sem.available_permits() > 0 {
             self.pop().await;
         }

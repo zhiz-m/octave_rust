@@ -1,3 +1,4 @@
+use anyhow::{Context};
 use rspotify::{
     clients::BaseClient,
     model::{
@@ -69,15 +70,13 @@ pub struct SpotifyClient {
 }
 
 impl SpotifyClient {
-    pub async fn new() -> Result<SpotifyClient, String> {
+    pub async fn new() -> anyhow::Result<SpotifyClient> {
         let creds = Credentials::new(
             "5f573c9620494bae87890c0f08a60293",
             "212476d9b0f3472eaa762d90b19b0ba8",
         );
         let mut spotify = ClientCredsSpotify::new(creds);
-        if let Err(why) = spotify.request_token().await {
-            return Err(why.to_string());
-        };
+        spotify.request_token().await?;
         Ok(SpotifyClient { client: spotify })
     }
     pub fn process_track_objects(
@@ -102,22 +101,9 @@ impl SpotifyClient {
         }
         songs
     }
-    pub async fn get_playlist(&self, playlist_id: &str) -> Result<Vec<TrackObject>, String> {
-        let playlist_id = PlaylistId::from_id(playlist_id);
-        let playlist_id = match playlist_id {
-            Ok(playlist_id) => playlist_id,
-            Err(why) => {
-                return Err(format!("spotify::get_playlist: {:?}", why));
-            }
-        };
-        let tracks = self.client.playlist(&playlist_id, None, None).await;
-        let tracks = match tracks {
-            Ok(tracks) => tracks,
-            Err(why) => {
-                println!("Error in spotify.get_playlist: {:?}", why);
-                return Err(format!("spotify::get_playlist: {:?}", why));
-            }
-        };
+    pub async fn get_playlist(&self, playlist_id: &str) -> anyhow::Result<Vec<TrackObject>> {
+        let playlist_id = PlaylistId::from_id(playlist_id)?;
+        let tracks = self.client.playlist(&playlist_id, None, None).await?;
         let items = tracks.tracks.items;
         let mut tracks = vec![];
         for data in items.into_iter() {
@@ -130,72 +116,41 @@ impl SpotifyClient {
         }
         Ok(tracks)
     }
-    pub async fn get_track(&self, track_id: &str) -> Result<TrackObject, String> {
-        let track_id = TrackId::from_id(track_id);
-        let track_id = match track_id {
-            Ok(track_id) => track_id,
-            Err(why) => {
-                return Err(format!("spotify::get_track: {:?}", why));
-            }
-        };
-        let track = self.client.track(&track_id).await;
-        let track = match track {
-            Ok(track) => track,
-            Err(why) => {
-                println!("Error in spotify.get_track: {:?}", why);
-                return Err(format!("spotify::get_track: {:?}", why));
-            }
-        };
+    pub async fn get_track(&self, track_id: &str) -> anyhow::Result<TrackObject> {
+        let track_id = TrackId::from_id(track_id)?;
+        let track = self.client.track(&track_id).await?;
         Ok(TrackObject::FullTrack(track))
     }
-    async fn random_from_artist(&self, id: &ArtistId) -> Option<TrackObject> {
+    async fn random_from_artist(&self, id: &ArtistId) -> anyhow::Result<TrackObject> {
         let tracks = self
             .client
             .artist_top_tracks(id, &Market::Country(Country::Japan))
-            .await;
-        match tracks {
-            Ok(tracks) => Some(TrackObject::FullTrack(
-                tracks.into_iter().choose(&mut rand::thread_rng())?,
-            )),
-            Err(why) => {
-                println!("Error SpotifyClient::random_from_artist: {:?}", why);
-                None
-            }
-        }
+            .await?;
+        Ok(TrackObject::FullTrack(
+            tracks.into_iter().choose(&mut rand::thread_rng()).context("returned tracks was empty")?,
+        ))
     }
-    async fn random_from_album(&self, id: &AlbumId) -> Option<TrackObject> {
-        let album = self.client.album(id).await;
-        match album {
-            Ok(album) => {
-                let tracks = album.tracks.items;
-                Some(TrackObject::SimplifiedTrack(
-                    tracks.into_iter().choose(&mut rand::thread_rng())?,
-                ))
-            }
-            Err(why) => {
-                println!("Error SpotifyClient::random_from_album: {:?}", why);
-                None
-            }
-        }
+    async fn random_from_album(&self, id: &AlbumId) -> anyhow::Result<TrackObject> {
+        let album = self.client.album(id).await?;
+        Ok(TrackObject::SimplifiedTrack(
+            album.tracks.items.into_iter().choose(&mut rand::thread_rng()).context("returned tracks was empty")?,
+        ))
     }
     //  -> Result<Vec<(Song, Option<Work>)>, String>
     pub async fn recommend_playlist(
-        client: Arc<SpotifyClient>,
+        self: Arc<Self>,
         amount: usize,
         playlist_id: &str,
-    ) -> Result<Vec<TrackObject>, String> {
+    ) -> anyhow::Result<Vec<TrackObject>> {
         let mut tasks = vec![];
-        let tracks = match client.get_playlist(playlist_id).await {
-            Ok(tracks) => tracks,
-            Err(why) => return Err(why),
-        };
+        let tracks = self.get_playlist(playlist_id).await?;
         let tracks = Arc::new(tracks);
         //let tracks = tracks.sample(&mut rand::thread_rng(), amount);
         for _ in 0..amount {
             let tracks = tracks.clone();
             let ind = rand::thread_rng().gen::<u32>() as usize % tracks.len();
 
-            let client = client.clone();
+            let client = self.clone();
             let task = tokio::spawn(async move {
                 let track = &tracks[ind];
 
@@ -207,37 +162,19 @@ impl SpotifyClient {
                 match option {
                     // find random song from track artist
                     0 => {
-                        let artist = match track.artist_id() {
-                            Some(artist) => artist,
-                            None => return None,
-                        };
+                        let artist = track.artist_id().context("failed to find artist")?;
                         client.random_from_artist(artist).await
                     }
                     // find random song from track album
                     1 => {
-                        let album = match track.album_id() {
-                            Some(album) => album,
-                            None => {
-                                println!("album not found");
-                                return None;
-                            }
-                        };
+                        let album = track.album_id().context("album not found")?;
                         client.random_from_album(album).await
                     }
                     // find random song from a random similar artist
                     _ => {
-                        let artist = match track.artist_id() {
-                            Some(artist) => artist,
-                            None => return None,
-                        };
-                        let artists = client.client.artist_related_artists(artist).await;
-                        let artists = match artists {
-                            Ok(artists) => artists[..5].to_vec(),
-                            Err(why) => {
-                                println!("Error related artists: {:?}", why);
-                                return None;
-                            }
-                        };
+                        let artist = track.artist_id().context("failed to find artist")?;
+                        let artists = client.client.artist_related_artists(artist).await?;
+                        let artists = artists[..5].to_vec();
                         let id = &artists.iter().choose(&mut rand::thread_rng()).unwrap().id;
                         client.random_from_artist(id).await
                     }
@@ -248,10 +185,7 @@ impl SpotifyClient {
         }
         let mut tracks = vec![];
         for task in tasks.into_iter() {
-            match task.await.unwrap() {
-                Some(track) => tracks.push(track),
-                None => continue,
-            }
+            tracks.push(task.await??)
         }
         tracks.shuffle(&mut rand::thread_rng());
         Ok(tracks)

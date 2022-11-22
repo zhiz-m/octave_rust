@@ -7,10 +7,17 @@ use std::{
     time::Duration,
 };
 
-use crate::{config::audio::MESSAGE_UI_COMPONENT_CHAIN_INTERVAL_MS, util::get_styled_embed, PoiseContext};
-use anyhow::{Context as AContext, anyhow};
+use crate::{
+    config::audio::MESSAGE_UI_COMPONENT_CHAIN_INTERVAL_MS, util::get_styled_embed, PoiseContext,
+};
+use anyhow::{anyhow, Context as AContext};
 use futures::StreamExt;
-use poise::serenity_prelude::{Message, ChannelId, Context, UserId, CreateActionRow, CreateButton, ButtonStyle, CreateSelectMenu, CreateSelectMenuOption, MessageComponentInteraction, InteractionResponseType, ModalSubmitInteraction, ActionRowComponent, CreateEmbed, CreateInputText, InputTextStyle, CreateComponents};
+use poise::serenity_prelude::{
+    ActionRowComponent, ButtonStyle, ChannelId, Context, CreateActionRow, CreateButton,
+    CreateComponents, CreateEmbed, CreateInputText, CreateSelectMenu, CreateSelectMenuOption,
+    InputTextStyle, InteractionResponseType, Message, MessageComponentInteraction,
+    ModalSubmitInteraction, UserId,
+};
 use songbird::tracks::TrackCommand;
 use tokio::{sync::Mutex, time::timeout};
 
@@ -45,7 +52,7 @@ impl MessageUiComponent {
         }
     }
 
-    pub fn add_components(c: &mut CreateComponents) -> &mut CreateComponents{
+    pub fn add_components(c: &mut CreateComponents) -> &mut CreateComponents {
         c.add_action_row(
             CreateActionRow::default()
                 .add_button(
@@ -142,9 +149,7 @@ impl MessageUiComponent {
     }
 
     pub async fn start_with_poise_context(&mut self, ctx: &PoiseContext<'_>) -> anyhow::Result<()> {
-        let handle = ctx.send(|b|{
-            b.components(Self::add_components)
-        }).await?;
+        let handle = ctx.send(|b| b.components(Self::add_components)).await?;
 
         self.init_handler(handle.into_message().await?);
         Ok(())
@@ -240,35 +245,31 @@ impl MessageUiComponent {
         match id {
             "skip" => {
                 audio_state.send_track_command(TrackCommand::Stop).await?;
-                mci
-                    .create_interaction_response(context, |r| {
-                        r.kind(InteractionResponseType::DeferredUpdateMessage)
-                    })
-                    .await?;
+                mci.create_interaction_response(context, |r| {
+                    r.kind(InteractionResponseType::DeferredUpdateMessage)
+                })
+                .await?;
             }
             "clear" => {
                 audio_state.clear().await?;
-                mci
-                    .create_interaction_response(context, |r| {
-                        r.kind(InteractionResponseType::DeferredUpdateMessage)
-                    })
-                    .await?;
+                mci.create_interaction_response(context, |r| {
+                    r.kind(InteractionResponseType::DeferredUpdateMessage)
+                })
+                .await?;
             }
             "loop" => {
                 audio_state.change_looping(None).await?;
-                mci
-                    .create_interaction_response(context, |r| {
-                        r.kind(InteractionResponseType::DeferredUpdateMessage)
-                    })
-                    .await?;
+                mci.create_interaction_response(context, |r| {
+                    r.kind(InteractionResponseType::DeferredUpdateMessage)
+                })
+                .await?;
             }
             "play_pause" => {
                 audio_state.pause_resume(None).await?;
-                mci
-                    .create_interaction_response(context, |r| {
-                        r.kind(InteractionResponseType::DeferredUpdateMessage)
-                    })
-                    .await?;
+                mci.create_interaction_response(context, |r| {
+                    r.kind(InteractionResponseType::DeferredUpdateMessage)
+                })
+                .await?;
             }
             "shuffle_selection" => {
                 let selections = &mci.data.values;
@@ -283,11 +284,10 @@ impl MessageUiComponent {
                     "f" => user_state.should_shuffle = false,
                     _ => unreachable!(),
                 };
-                mci
-                    .create_interaction_response(context, |r| {
-                        r.kind(InteractionResponseType::DeferredUpdateMessage)
-                    })
-                    .await?;
+                mci.create_interaction_response(context, |r| {
+                    r.kind(InteractionResponseType::DeferredUpdateMessage)
+                })
+                .await?;
             }
             "add_songs" => {
                 mci.create_interaction_response(context, |r| {
@@ -316,16 +316,15 @@ impl MessageUiComponent {
             }
             "queue" => {
                 let text = audio_state.get_string().await;
-                mci
-                    .create_interaction_response(context, |r| {
-                        r.kind(InteractionResponseType::ChannelMessageWithSource)
-                            .interaction_response_data(move |d| {
-                                d.add_embed(
-                                    get_styled_embed(&mut CreateEmbed::default(), &text).to_owned(),
-                                )
-                            })
-                    })
-                    .await?;
+                mci.create_interaction_response(context, |r| {
+                    r.kind(InteractionResponseType::ChannelMessageWithSource)
+                        .interaction_response_data(move |d| {
+                            d.add_embed(
+                                get_styled_embed(&mut CreateEmbed::default(), &text).to_owned(),
+                            )
+                        })
+                })
+                .await?;
                 audio_state.display_ui().await?;
             }
             _ => unreachable!(),
@@ -341,7 +340,9 @@ impl MessageUiComponent {
     ) -> anyhow::Result<()> {
         let id = mci.data.custom_id.as_str();
         if id != "song_query_modal" {
-            return Err(anyhow!("process_modal_interaction: id was not \"song_query_modal\""));
+            return Err(anyhow!(
+                "process_modal_interaction: id was not \"song_query_modal\""
+            ));
         }
         let component = mci
             .data

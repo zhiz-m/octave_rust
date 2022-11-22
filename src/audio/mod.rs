@@ -1,5 +1,5 @@
-pub mod audio;
 pub mod audio_state;
+pub mod commands;
 pub mod config;
 
 mod message_ui_component;
@@ -11,4 +11,4 @@ mod subprocess;
 mod work;
 mod youtube_loader;
 
-pub use audio::*;
+pub use commands::*;

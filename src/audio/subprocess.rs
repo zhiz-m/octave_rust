@@ -194,7 +194,7 @@ fn _parse_loudnorm_params(buf: &str, target: &str) -> Result<f64, String> {
         }
     };
 
-    match split.split(' ').filter(|&x| !x.is_empty()).next() {
+    match split.split(' ').find(|&x| !x.is_empty()) {
         Some(res) => Ok(res.parse::<f64>().unwrap()),
         None => Err(format!(
             "subprocess:: _parse_loudnorm_params failed to find item value for {}",
@@ -297,11 +297,11 @@ async fn ffmpeg_loudnorm_convert(
     Ok(out.stdout)
 }
 
-fn ffmpeg_pcm_loudnorm(
+/*fn ffmpeg_pcm_loudnorm(
     buf: Vec<u8>,
     loudnorm: LoudnormConfig,
 ) -> Result<Box<dyn Read + Send>, String> {
-    let loudnorm_string = format!("loudnorm=I=-16:LRA=11:TP=-1.5:measured_I={:.2}:measured_LRA={:.2}:measured_TP={:.2}:measured_thresh={:.2}", 
+    let loudnorm_string = format!("loudnorm=I=-16:LRA=11:TP=-1.5:measured_I={:.2}:measured_LRA={:.2}:measured_TP={:.2}:measured_thresh={:.2}",
                                         loudnorm.integrated, loudnorm.lra, loudnorm.true_peak, loudnorm.threshold);
     let mut cmd = Command::new("ffmpeg");
     let cmd = cmd
@@ -345,7 +345,7 @@ fn ffmpeg_pcm_loudnorm(
     let buf = BufReader::with_capacity(16384 * 32, stdout);
     let buf: Box<dyn Read + Send> = Box::new(buf);
     Ok(buf)
-}
+}*/
 
 // for loudnorm, requires existing, downloaded buffer
 pub async fn get_pcm_reader(
@@ -423,6 +423,7 @@ pub async fn get_pcm_reader(
     Ok(buf)
 }
 
+/*
 // streams live from youtube
 pub fn ffmpeg_pcm(url: String) -> Result<Box<dyn MediaSource + Send>, String> {
     /*let res = tokio::task::spawn_blocking(move ||{
@@ -466,7 +467,7 @@ pub fn ffmpeg_pcm(url: String) -> Result<Box<dyn MediaSource + Send>, String> {
     let buf = Box::new(BufReaderSeek::<ChildStdout>::new(buf));
     Ok(buf)
 }
-
+*/
 /*
 fn ffmpeg(url: &str){
 

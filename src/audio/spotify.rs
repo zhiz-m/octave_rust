@@ -1,4 +1,4 @@
-use anyhow::{Context};
+use anyhow::Context;
 use rspotify::{
     clients::BaseClient,
     model::{
@@ -28,8 +28,8 @@ use super::{
 use std::sync::Arc;
 
 pub enum TrackObject {
-    FullTrack(FullTrack),
-    SimplifiedTrack(SimplifiedTrack),
+    FullTrack(Box<FullTrack>),
+    SimplifiedTrack(Box<SimplifiedTrack>),
 }
 
 impl TrackObject {
@@ -112,29 +112,37 @@ impl SpotifyClient {
                 Some(_) => continue,
                 None => continue,
             };
-            tracks.push(TrackObject::FullTrack(track));
+            tracks.push(TrackObject::FullTrack(Box::new(track)));
         }
         Ok(tracks)
     }
     pub async fn get_track(&self, track_id: &str) -> anyhow::Result<TrackObject> {
         let track_id = TrackId::from_id(track_id)?;
         let track = self.client.track(&track_id).await?;
-        Ok(TrackObject::FullTrack(track))
+        Ok(TrackObject::FullTrack(Box::new(track)))
     }
     async fn random_from_artist(&self, id: &ArtistId) -> anyhow::Result<TrackObject> {
         let tracks = self
             .client
             .artist_top_tracks(id, &Market::Country(Country::Japan))
             .await?;
-        Ok(TrackObject::FullTrack(
-            tracks.into_iter().choose(&mut rand::thread_rng()).context("returned tracks was empty")?,
-        ))
+        Ok(TrackObject::FullTrack(Box::new(
+            tracks
+                .into_iter()
+                .choose(&mut rand::thread_rng())
+                .context("returned tracks was empty")?,
+        )))
     }
     async fn random_from_album(&self, id: &AlbumId) -> anyhow::Result<TrackObject> {
         let album = self.client.album(id).await?;
-        Ok(TrackObject::SimplifiedTrack(
-            album.tracks.items.into_iter().choose(&mut rand::thread_rng()).context("returned tracks was empty")?,
-        ))
+        Ok(TrackObject::SimplifiedTrack(Box::new(
+            album
+                .tracks
+                .items
+                .into_iter()
+                .choose(&mut rand::thread_rng())
+                .context("returned tracks was empty")?,
+        )))
     }
     //  -> Result<Vec<(Song, Option<Work>)>, String>
     pub async fn recommend_playlist(

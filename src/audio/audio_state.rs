@@ -1,4 +1,4 @@
-use crate::{util::send_embed_http, PoiseContext};
+use crate::{util::send_embed, PoiseContext};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rand::seq::SliceRandom;
@@ -20,6 +20,7 @@ use super::{
     subprocess::get_pcm_reader,
     work::StreamType,
 };
+use poise::serenity_prelude::{ChannelId, Context, Mutex as SerenityMutex};
 use songbird::{
     input::{self, reader::Reader},
     tracks::{TrackCommand, TrackHandle},
@@ -29,7 +30,6 @@ use tokio::{
     sync::{Mutex, Semaphore},
     time::timeout,
 };
-use poise::serenity_prelude::{Mutex as SerenityMutex, ChannelId, Context};
 
 pub struct AudioState {
     queue: SongQueue,
@@ -106,7 +106,7 @@ impl AudioState {
                             log::error!("AudioState::play_audio_loop: handler failed to leave");
                         };
                     }
-                    if let Err(why) = self.cleanup().await{
+                    if let Err(why) = self.cleanup().await {
                         log::error!("AudioState::play_audio_loop: {}", why)
                     }
                     return;
@@ -162,15 +162,18 @@ impl AudioState {
 
                 let context = self.context.lock().await;
 
-                send_embed_http(
+                if let Err(why) = send_embed(
+                    &context.http,
                     *channel_id,
-                    context.http.clone(),
                     &format!("Now playing:\n\n {}", text),
                 )
-                .await;
+                .await
+                {
+                    log::error!("Err AudioState::play_audio: {:?}", why);
+                }
             }
 
-            if let Err(why) = self.display_ui().await{
+            if let Err(why) = self.display_ui().await {
                 log::error!("Err AudioState::play_audio: {:?}", why);
             }
 
@@ -193,7 +196,10 @@ impl AudioState {
         Ok(())
     }
 
-    pub async fn display_ui_with_poise_context_reply(self: &Arc<Self>, ctx: &PoiseContext<'_>) -> anyhow::Result<()>{
+    pub async fn display_ui_with_poise_context_reply(
+        self: &Arc<Self>,
+        ctx: &PoiseContext<'_>,
+    ) -> anyhow::Result<()> {
         let context = self.context.lock().await;
 
         let mut ptr = self.message_ui_component.lock().await;
@@ -217,8 +223,7 @@ impl AudioState {
     }
 
     pub async fn add_recommended_songs(&self, query: &str, amount: usize) -> anyhow::Result<()> {
-        let songs =
-            song_recommender(query, amount, *self.current_stream_type.lock().await).await?;
+        let songs = song_recommender(query, amount, *self.current_stream_type.lock().await).await?;
         self.queue.push(songs).await?;
         Ok(())
     }
@@ -303,7 +308,9 @@ impl AudioState {
                 *self.current_stream_type.lock().await = StreamType::Loudnorm;
                 Ok(())
             }
-            _ => Err(anyhow!("Invalid input, accepted args are 'online' and 'loudnorm'")),
+            _ => Err(anyhow!(
+                "Invalid input, accepted args are 'online' and 'loudnorm'"
+            )),
         }
     }
 

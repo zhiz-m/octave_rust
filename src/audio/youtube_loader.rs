@@ -9,14 +9,22 @@ pub struct YoutubeLoader {
 
 impl YoutubeLoader {
     pub async fn add_work(&self, work: Work) -> anyhow::Result<()> {
-        self.work.send(work).await.map_err(|e|anyhow!(e.to_string()))?;
+        self.work
+            .send(work)
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
         Ok(())
     }
     async fn loader_loop(mut work: mpsc::Receiver<Work>) -> anyhow::Result<()> {
         while let Some(work) = work.recv().await {
-            let buf_config = get_pcm_reader_config(&work.query, work.stream_type).await.map_err(|e|anyhow!(e.to_string()))?;
+            let buf_config = get_pcm_reader_config(&work.query, work.stream_type)
+                .await
+                .map_err(|e| anyhow!(e))?;
 
-            work.sender.send(Some(buf_config)).await.map_err(|e|anyhow!(e.to_string()))?;
+            work.sender
+                .send(Some(buf_config))
+                .await
+                .map_err(|e| anyhow!(e.to_string()))?;
 
             {
                 let mut is_loaded = work.is_loaded.lock().await;
@@ -28,7 +36,10 @@ impl YoutubeLoader {
     }
 
     pub async fn cleanup(&mut self) -> anyhow::Result<()> {
-        self.kill.send(()).await.map_err(|e|anyhow!(e.to_string()))?;
+        self.kill
+            .send(())
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
         Ok(())
     }
 

@@ -2,7 +2,7 @@ use super::audio_state::AudioState;
 use anyhow::{Context, anyhow};
 use poise::Command;
 use songbird::tracks::TrackCommand;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{util::send_embed, Data, Error, PoiseContext};
 
@@ -48,107 +48,118 @@ async fn remove_audio_state(ctx: &PoiseContext<'_>) -> anyhow::Result<(), Error>
     let mut audio_states = ctx.data().get_audio_states().lock().await;
     
     let state = audio_states.remove(&guild_id).context("bot not active in current guild")?;
-    state.cleanup().await;
+    state.cleanup().await?;
     Ok(())
 }
 
 /// Starts the bot and shows the user interface menu
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn start(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
-    audio_state.display_ui().await;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Disconnects the bot
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn exit(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     remove_audio_state(&ctx).await?;
+    send_embed(ctx.discord(), ctx.channel_id(), "Disconnected").await?;
     Ok(())
 }
 
 /// Play a song or playlist
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn play(ctx: PoiseContext<'_>, #[description = "shuffle songs?"] b: bool, #[description = "song/playlist URL or search query"] query: String) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     audio_state.add_audio(&query, b).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Use our advanced song recommendation algorithm to play songs
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn recommend(ctx: PoiseContext<'_>, #[description = "Spotify playlist link"] query: String, #[description = "number of songs"] amount: String ) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     let amount = amount.parse().context("invalid integer")?;
     audio_state.add_recommended_songs(&query, amount).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Use our advanced song recommendation algorithm to play songs in addition to your playlist
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn extend(ctx: PoiseContext<'_>, #[description = "Spotify playlist link"] query: String, #[description = "ratio of recommended songs to add"] ratio: String ) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
 
     let extend_ratio = ratio.parse().context("invalid ratio")?;
     audio_state.extend_songs(&query, extend_ratio).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Skips the currently playing song
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn skip(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     audio_state.send_track_command(TrackCommand::Stop).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Play or pause the audio player
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn pause_resume(ctx: PoiseContext<'_>, #[description = "Whether to pause (y) or resume (n)"] b: bool) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     audio_state.pause_resume(Some(b)).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Shuffles the order of queued songs
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn shuffle(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     audio_state.shuffle().await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Removes all queued songs
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn clear(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     audio_state.clear().await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Sets the current song to loop / not loop
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn looping(ctx: PoiseContext<'_>, #[description = "Whether to loop (y) or not loop (n)"] b: bool) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
     audio_state.change_looping(Some(b)).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Changes the stream type: allowed values are "online" or "loudnorm" 
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn stream_type(ctx: PoiseContext<'_>, #[description = "Allowed values: \"online\" or \"loudnorm\" "] query: String) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
-
     audio_state.change_stream_type(&query).await?;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
     Ok(())
 }
 
 /// Displays the queue
-#[poise::command(slash_command)]
+#[poise::command(prefix_command,slash_command)]
 async fn queue(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
-
     send_embed(ctx.discord(), ctx.channel_id(), &audio_state.get_string().await).await?;
+    // wait to ensure items appear in order
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    audio_state.display_ui_with_poise_context_reply(&ctx).await?;
 
     Ok(())
 }

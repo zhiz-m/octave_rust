@@ -2,7 +2,6 @@ use super::work::StreamType;
 use songbird::input::reader::MediaSource;
 use std::{
     io::{BufReader, Read, Seek, Write},
-    mem::drop,
     process::{ChildStdin, ChildStdout, Command, Stdio},
     str,
     time::Instant,

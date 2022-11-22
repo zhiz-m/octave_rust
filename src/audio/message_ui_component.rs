@@ -7,10 +7,10 @@ use std::{
     time::Duration,
 };
 
-use crate::{config::audio::MESSAGE_UI_COMPONENT_CHAIN_INTERVAL_MS, util::get_styled_embed};
-use anyhow::Context as AContext;
+use crate::{config::audio::MESSAGE_UI_COMPONENT_CHAIN_INTERVAL_MS, util::get_styled_embed, PoiseContext};
+use anyhow::{Context as AContext, anyhow};
 use futures::StreamExt;
-use poise::serenity_prelude::{Message, ChannelId, Context, UserId, CreateActionRow, CreateButton, ButtonStyle, CreateSelectMenu, CreateSelectMenuOption, MessageComponentInteraction, InteractionResponseType, ModalSubmitInteraction, ActionRowComponent, CreateEmbed, CreateInputText, InputTextStyle};
+use poise::serenity_prelude::{Message, ChannelId, Context, UserId, CreateActionRow, CreateButton, ButtonStyle, CreateSelectMenu, CreateSelectMenuOption, MessageComponentInteraction, InteractionResponseType, ModalSubmitInteraction, ActionRowComponent, CreateEmbed, CreateInputText, InputTextStyle, CreateComponents};
 use songbird::tracks::TrackCommand;
 use tokio::{sync::Mutex, time::timeout};
 
@@ -30,131 +30,127 @@ impl Default for UserState {
 
 pub struct MessageUiComponent {
     should_cleanup: Arc<AtomicBool>,
-    message: Option<Message>,
-    channel_id: ChannelId,
     context: Arc<Context>,
     audio_state: Arc<AudioState>,
     user_state_map: Arc<Mutex<HashMap<UserId, UserState>>>,
 }
 
 impl MessageUiComponent {
-    pub fn new(audio_state: Arc<AudioState>, channel_id: ChannelId, context: Arc<Context>) -> Self {
+    pub fn new(audio_state: Arc<AudioState>, context: Arc<Context>) -> Self {
         Self {
             should_cleanup: Arc::new(AtomicBool::new(false)),
-            message: None,
-            channel_id,
             context,
             audio_state,
             user_state_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub async fn start(&mut self) -> Result<(), String> {
-        let m = self
-            .channel_id
-            .send_message(self.context.http.clone(), |m| {
-                m.components(|c| {
-                    c.add_action_row(
-                        CreateActionRow::default()
-                            .add_button(
-                                CreateButton::default()
-                                    .custom_id("skip")
-                                    .emoji('↪')
-                                    .style(ButtonStyle::Secondary)
-                                    .label("Skip")
+    pub fn add_components(c: &mut CreateComponents) -> &mut CreateComponents{
+        c.add_action_row(
+            CreateActionRow::default()
+                .add_button(
+                    CreateButton::default()
+                        .custom_id("skip")
+                        .emoji('↪')
+                        .style(ButtonStyle::Secondary)
+                        .label("Skip")
+                        .to_owned(),
+                )
+                .add_button(
+                    CreateButton::default()
+                        .custom_id("clear")
+                        .emoji('🗑')
+                        .style(ButtonStyle::Danger)
+                        .label("Clear")
+                        .to_owned(),
+                )
+                .add_button(
+                    CreateButton::default()
+                        .custom_id("play_pause")
+                        .emoji('⏸')
+                        .emoji('▶')
+                        .style(ButtonStyle::Secondary)
+                        .label("Play/Pause")
+                        .to_owned(),
+                )
+                .add_button(
+                    CreateButton::default()
+                        .custom_id("loop")
+                        .emoji('🔁')
+                        .style(ButtonStyle::Secondary)
+                        .label("Loop")
+                        .to_owned(),
+                )
+                .to_owned(),
+        )
+        .add_action_row(
+            CreateActionRow::default()
+                .add_select_menu(
+                    CreateSelectMenu::default()
+                        .custom_id("shuffle_selection")
+                        .options(|m| {
+                            m.add_option(
+                                CreateSelectMenuOption::default()
+                                    .default_selection(true)
+                                    .value("t")
+                                    .label("Shuffle newly added songs: yes")
                                     .to_owned(),
                             )
-                            .add_button(
-                                CreateButton::default()
-                                    .custom_id("clear")
-                                    .emoji('🗑')
-                                    .style(ButtonStyle::Danger)
-                                    .label("Clear")
+                            .add_option(
+                                CreateSelectMenuOption::default()
+                                    .default_selection(false)
+                                    .value("f")
+                                    .label("Shuffle newly added songs: no")
                                     .to_owned(),
                             )
-                            .add_button(
-                                CreateButton::default()
-                                    .custom_id("play_pause")
-                                    .emoji('⏸')
-                                    .emoji('▶')
-                                    .style(ButtonStyle::Secondary)
-                                    .label("Play/Pause")
-                                    .to_owned(),
-                            )
-                            .add_button(
-                                CreateButton::default()
-                                    .custom_id("loop")
-                                    .emoji('🔁')
-                                    .style(ButtonStyle::Secondary)
-                                    .label("Loop")
-                                    .to_owned(),
-                            )
-                            .to_owned(),
-                    )
-                    .add_action_row(
-                        CreateActionRow::default()
-                            .add_select_menu(
-                                CreateSelectMenu::default()
-                                    .custom_id("shuffle_selection")
-                                    .options(|m| {
-                                        m.add_option(
-                                            CreateSelectMenuOption::default()
-                                                .default_selection(true)
-                                                .value("t")
-                                                .label("Shuffle newly added songs: yes")
-                                                .to_owned(),
-                                        )
-                                        .add_option(
-                                            CreateSelectMenuOption::default()
-                                                .default_selection(false)
-                                                .value("f")
-                                                .label("Shuffle newly added songs: no")
-                                                .to_owned(),
-                                        )
-                                    })
-                                    .to_owned(),
-                            )
-                            .to_owned(),
-                    )
-                    .add_action_row(
-                        CreateActionRow::default()
-                            .add_button(
-                                CreateButton::default()
-                                    .custom_id("add_songs")
-                                    .emoji('🎶')
-                                    .style(ButtonStyle::Success)
-                                    .label("Add Songs")
-                                    .to_owned(),
-                            )
-                            .add_button(
-                                CreateButton::default()
-                                    .custom_id("queue")
-                                    .emoji('🗒')
-                                    .style(ButtonStyle::Secondary)
-                                    .label("Display Queue")
-                                    .to_owned(),
-                            )
-                            .to_owned(),
-                    )
-                })
-            })
-            .await
-            .map_err(|e| e.to_string())?;
+                        })
+                        .to_owned(),
+                )
+                .to_owned(),
+        )
+        .add_action_row(
+            CreateActionRow::default()
+                .add_button(
+                    CreateButton::default()
+                        .custom_id("add_songs")
+                        .emoji('🎶')
+                        .style(ButtonStyle::Success)
+                        .label("Add Songs")
+                        .to_owned(),
+                )
+                .add_button(
+                    CreateButton::default()
+                        .custom_id("queue")
+                        .emoji('🗒')
+                        .style(ButtonStyle::Secondary)
+                        .label("Display Queue")
+                        .to_owned(),
+                )
+                .to_owned(),
+        )
+    }
 
-        self.message = Some(m);
-        self.initiate_tasks();
+    pub async fn start_with_channel_id(&mut self, channel_id: ChannelId) -> anyhow::Result<()> {
+        let m = channel_id
+            .send_message(self.context.http.clone(), |m| {
+                m.components(Self::add_components)
+            })
+            .await?;
+
+        self.init_handler(m);
         Ok(())
     }
 
-    fn initiate_tasks(&mut self) {
-        let m = match self.message.as_ref() {
-            Some(m) => Arc::new(m.clone()),
-            None => {
-                log::error!("error in interaction_loop: ui message is empty");
-                return;
-            }
-        };
+    pub async fn start_with_poise_context(&mut self, ctx: &PoiseContext<'_>) -> anyhow::Result<()> {
+        let handle = ctx.send(|b|{
+            b.components(Self::add_components)
+        }).await?;
 
+        self.init_handler(handle.into_message().await?);
+        Ok(())
+    }
+
+    fn init_handler(&mut self, m: Message) {
         {
             let context = self.context.clone();
             let should_cleanup = self.should_cleanup.clone();
@@ -330,7 +326,7 @@ impl MessageUiComponent {
                             })
                     })
                     .await?;
-                audio_state.display_ui().await;
+                audio_state.display_ui().await?;
             }
             _ => unreachable!(),
         };
@@ -342,10 +338,10 @@ impl MessageUiComponent {
         context: &Arc<Context>,
         user_state_map: &Arc<Mutex<HashMap<UserId, UserState>>>,
         audio_state: &Arc<AudioState>,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let id = mci.data.custom_id.as_str();
         if id != "song_query_modal" {
-            return Err("process_modal_interaction: id was not \"song_query_modal\"".to_owned());
+            return Err(anyhow!("process_modal_interaction: id was not \"song_query_modal\""));
         }
         let component = mci
             .data
@@ -353,10 +349,10 @@ impl MessageUiComponent {
             .iter()
             .flat_map(|x| x.components.iter())
             .next()
-            .ok_or("process_modal_interaction: no ActionRowComponent")?;
+            .context("process_modal_interaction: no ActionRowComponent")?;
         let query = match component {
             ActionRowComponent::InputText(x) => &x.value,
-            _ => return Err("process_modal_interaction: no InputText component".to_owned()),
+            _ => return Err(anyhow!("process_modal_interaction: no InputText component")),
         };
         let user_id = mci.user.id;
         let user_state_map = user_state_map.lock().await;
@@ -364,16 +360,15 @@ impl MessageUiComponent {
             Some(state) => state.should_shuffle,
             None => true,
         };
-        audio_state.add_audio(query, shuffle).await;
+        audio_state.add_audio(query, shuffle).await?;
         mci.create_interaction_response(context, |r| {
             r.kind(InteractionResponseType::ChannelMessageWithSource)
                 .interaction_response_data(|d| {
                     d.content(&format!("***Now playing from:*** _{}_", query))
                 })
         })
-        .await
-        .map_err(|e| e.to_string())?;
-        audio_state.display_ui().await;
+        .await?;
+        audio_state.display_ui().await?;
         Ok(())
     }
 }

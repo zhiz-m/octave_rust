@@ -74,7 +74,7 @@ impl AudioState {
         audio_state
     }
 
-    pub async fn set_context<'a>(self: &Arc<Self>, ctx: &PoiseContext<'a>) {
+    pub async fn set_context<'a>(&self, ctx: &PoiseContext<'a>) {
         {
             let mut channel_id = self.channel_id.lock().await;
             *channel_id = ctx.channel_id();
@@ -106,7 +106,9 @@ impl AudioState {
                             log::error!("AudioState::play_audio_loop: handler failed to leave");
                         };
                     }
-                    self.cleanup().await;
+                    if let Err(why) = self.cleanup().await{
+                        log::error!("AudioState::play_audio_loop: {}", why)
+                    }
                     return;
                 }
             };
@@ -168,7 +170,9 @@ impl AudioState {
                 .await;
             }
 
-            self.display_ui().await;
+            if let Err(why) = self.display_ui().await{
+                log::error!("Err AudioState::play_audio: {:?}", why);
+            }
 
             let mut current_song = self.current_song.lock().await;
             *current_song = Some(song);
@@ -177,40 +181,49 @@ impl AudioState {
         }
     }
 
-    pub async fn display_ui(self: &Arc<Self>) {
+    pub async fn display_ui(self: &Arc<Self>) -> anyhow::Result<()> {
         let channel_id = self.channel_id.lock().await;
 
         let context = self.context.lock().await;
 
         let mut ptr = self.message_ui_component.lock().await;
-        let mut component = MessageUiComponent::new(self.clone(), *channel_id, context.clone());
-        if let Err(why) = component.start().await {
-            log::error!("Err AudioState::play_audio: {:?}", why);
-        }
+        let mut component = MessageUiComponent::new(self.clone(), context.clone());
+        component.start_with_channel_id(*channel_id).await?;
         *ptr = Some(component);
+        Ok(())
     }
 
-    pub fn play_next_song(self: &Arc<Self>) {
+    pub async fn display_ui_with_poise_context_reply(self: &Arc<Self>, ctx: &PoiseContext<'_>) -> anyhow::Result<()>{
+        let context = self.context.lock().await;
+
+        let mut ptr = self.message_ui_component.lock().await;
+        let mut component = MessageUiComponent::new(self.clone(), context.clone());
+        component.start_with_poise_context(ctx).await?;
+        *ptr = Some(component);
+        Ok(())
+    }
+
+    pub fn play_next_song(&self) {
         self.song_ready.add_permits(1);
     }
 
-    pub async fn add_audio(self: &Arc<Self>, query: &str, shuffle: bool) -> anyhow::Result<()> {
+    pub async fn add_audio(&self, query: &str, shuffle: bool) -> anyhow::Result<()> {
         let mut songs = process_query(query, *self.current_stream_type.lock().await).await?;
         if shuffle {
             songs.shuffle(&mut rand::thread_rng());
         }
-        self.queue.push(songs).await;
+        self.queue.push(songs).await?;
         Ok(())
     }
 
-    pub async fn add_recommended_songs(self: &Arc<Self>, query: &str, amount: usize) -> anyhow::Result<()> {
+    pub async fn add_recommended_songs(&self, query: &str, amount: usize) -> anyhow::Result<()> {
         let songs =
             song_recommender(query, amount, *self.current_stream_type.lock().await).await?;
-        self.queue.push(songs).await;
+        self.queue.push(songs).await?;
         Ok(())
     }
 
-    pub async fn extend_songs(self: &Arc<Self>, query: &str, extend_ratio: f64) -> anyhow::Result<()> {
+    pub async fn extend_songs(&self, query: &str, extend_ratio: f64) -> anyhow::Result<()> {
         let mut songs = process_query(query, *self.current_stream_type.lock().await).await?;
         let recommended_songs = song_recommender(
             query,
@@ -220,11 +233,11 @@ impl AudioState {
         .await?;
         songs.extend(recommended_songs);
         songs.shuffle(&mut rand::thread_rng());
-        self.queue.push(songs).await;
+        self.queue.push(songs).await?;
         Ok(())
     }
 
-    pub async fn send_track_command(self: &Arc<Self>, cmd: TrackCommand) -> anyhow::Result<()> {
+    pub async fn send_track_command(&self, cmd: TrackCommand) -> anyhow::Result<()> {
         let track_handle = self.track_handle.lock().await;
         match track_handle.as_ref() {
             Some(track_handle) => track_handle.send(cmd).map_err(|e| anyhow!(e.to_string())),
@@ -232,7 +245,7 @@ impl AudioState {
         }
     }
 
-    pub async fn pause_resume(self: &Arc<Self>, try_pause: Option<bool>) -> anyhow::Result<()> {
+    pub async fn pause_resume(&self, try_pause: Option<bool>) -> anyhow::Result<()> {
         // if None, then we reverse the current play/pause state
         let try_pause = try_pause.unwrap_or(!self.is_paused.fetch_xor(true, Ordering::Relaxed));
         // not paused previously
@@ -243,16 +256,16 @@ impl AudioState {
         }
     }
 
-    pub async fn shuffle(self: &Arc<Self>) -> anyhow::Result<()> {
+    pub async fn shuffle(&self) -> anyhow::Result<()> {
         self.queue.shuffle().await
     }
 
-    pub async fn clear(self: &Arc<Self>) -> anyhow::Result<()> {
+    pub async fn clear(&self) -> anyhow::Result<()> {
         self.queue.clear().await
     }
 
     // on success, returns a bool that specifies whether the queue is now being looped
-    pub async fn change_looping(self: &Arc<Self>, try_loop: Option<bool>) -> anyhow::Result<bool> {
+    pub async fn change_looping(&self, try_loop: Option<bool>) -> anyhow::Result<bool> {
         {
             let current_song = self.current_song.lock().await;
             if current_song.is_none() {
@@ -280,7 +293,7 @@ impl AudioState {
         }*/
     }
 
-    pub async fn change_stream_type(self: &Arc<Self>, stream_type: &str) -> anyhow::Result<()> {
+    pub async fn change_stream_type(&self, stream_type: &str) -> anyhow::Result<()> {
         match stream_type.trim().to_lowercase().as_str() {
             "online" => {
                 *self.current_stream_type.lock().await = StreamType::Online;
@@ -294,11 +307,12 @@ impl AudioState {
         }
     }
 
-    pub async fn cleanup(self: &Arc<Self>) {
-        self.queue.cleanup().await;
+    pub async fn cleanup(&self) -> anyhow::Result<()> {
+        self.queue.cleanup().await?;
+        Ok(())
     }
 
-    pub async fn get_string(self: &Arc<Self>) -> String {
+    pub async fn get_string(&self) -> String {
         let current_song = self.current_song.lock().await;
         let current_song = match &*current_song {
             Some(song) => song.get_string().await,

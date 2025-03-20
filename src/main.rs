@@ -3,7 +3,7 @@ use audio::{
     config::{self, audio::BOT_PREFIX},
 };
 use serenity::all::ClientBuilder;
-use songbird::{SerenityInit, Songbird};
+use songbird::SerenityInit;
 use std::{collections::HashMap, env, sync::Arc};
 use tokio::sync::Mutex;
 use util::send_embed;
@@ -13,8 +13,7 @@ mod logger;
 mod util;
 
 use poise::{
-    samples::create_application_commands,
-    serenity_prelude::{CacheHttp, Command, GatewayIntents, GuildId},
+    serenity_prelude::{CacheHttp, GatewayIntents, GuildId},
     Context as RawPoiseContext,
 };
 

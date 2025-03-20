@@ -25,11 +25,7 @@ use songbird::{
     error::TrackResult,
     input::{
         self,
-        core::{
-            codecs::CodecType,
-            io::{MediaSourceStream, MediaSourceStreamOptions},
-            probe::Hint,
-        },
+        core::io::{MediaSourceStream, MediaSourceStreamOptions},
         AudioStream, LiveInput,
     },
     tracks::TrackHandle,

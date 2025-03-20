@@ -1,14 +1,13 @@
 use super::work::StreamType;
-use songbird::input::core::io::{MediaSource, ReadOnlySource};
+use songbird::input::core::io::MediaSource;
 use std::{
     io::{BufReader, Read, Seek, Write},
-    pin::Pin,
-    process::{ChildStdin, ChildStdout, Command, Stdio},
+    process::{ChildStdin, Command, Stdio},
     str,
     time::Instant,
 };
 use tokio::{
-    io::{AsyncRead, AsyncSeek, AsyncWriteExt},
+    io::AsyncWriteExt,
     process::Command as TokioCommand,
 };
 
@@ -101,10 +100,10 @@ async fn ytdl(query: &str) -> String {
         //.arg("--audio-quality").arg("128k")
         .arg(query);
     let out = cmd.output().await.unwrap();
-    let result = String::from_utf8(out.stdout).unwrap();
+    
     // let error = String::from_utf8(out.stderr).unwrap();
     // println!("youtube-dl returned {}, err {}", &result, &error);
-    result
+    String::from_utf8(out.stdout).unwrap()
 }
 /*
 async fn download_audio(mut url: String) -> Result<Vec<u8>, String> {

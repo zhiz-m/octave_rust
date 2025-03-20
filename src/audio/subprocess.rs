@@ -1,15 +1,13 @@
 use super::work::StreamType;
 use songbird::input::core::io::MediaSource;
 use std::{
-    io::{BufReader, Read, Seek, Write},
+    io::{BufReader, Write},
     process::{ChildStdin, Command, Stdio},
     str,
     time::Instant,
 };
-use tokio::{
-    io::AsyncWriteExt,
-    process::Command as TokioCommand,
-};
+use symphonia::core::io::ReadOnlySource;
+use tokio::{io::AsyncWriteExt, process::Command as TokioCommand};
 
 #[derive(Clone)]
 struct LoudnormConfig {
@@ -27,42 +25,42 @@ pub struct PcmReaderConfig {
     src_url: String,
 }
 
-pub struct BufReaderSeek<T: Read + Send> {
-    inner: BufReader<T>,
-}
+// pub struct BufReaderSeek<T: Read + Send> {
+//     inner: BufReader<T>,
+// }
 
-impl<T: Read + Send> BufReaderSeek<T> {
-    pub fn new(inner: BufReader<T>) -> BufReaderSeek<T> {
-        BufReaderSeek { inner }
-    }
-}
+// impl<T: Read + Send> BufReaderSeek<T> {
+//     pub fn new(inner: BufReader<T>) -> BufReaderSeek<T> {
+//         BufReaderSeek { inner }
+//     }
+// }
 
-impl<T: Read + Send + Sync> MediaSource for BufReaderSeek<T> {
-    fn is_seekable(&self) -> bool {
-        false
-    }
+// impl<T: Read + Send + Sync> MediaSource for BufReaderSeek<T> {
+//     fn is_seekable(&self) -> bool {
+//         false
+//     }
 
-    fn byte_len(&self) -> Option<u64> {
-        None
-    }
-}
+//     fn byte_len(&self) -> Option<u64> {
+//         None
+//     }
+// }
 
-impl<T: Read + Send> Seek for BufReaderSeek<T> {
-    fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "seek not supported",
-        ))
-    }
-}
+// impl<T: Read + Send> Seek for BufReaderSeek<T> {
+//     fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
+//         Err(std::io::Error::new(
+//             std::io::ErrorKind::Other,
+//             "seek not supported",
+//         ))
+//     }
+// }
 
-impl<T: Read + Send> Read for BufReaderSeek<T> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let res = self.inner.read(buf);
-        println!("read {:?} bytes", res);
-        res
-    }
-}
+// impl<T: Read + Send> Read for BufReaderSeek<T> {
+//     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+//         let res = self.inner.read(buf);
+//         println!("read {:?} bytes", res);
+//         res
+//     }
+// }
 
 pub async fn get_pcm_reader_config(
     youtube_url: &str,
@@ -100,7 +98,7 @@ async fn ytdl(query: &str) -> String {
         //.arg("--audio-quality").arg("128k")
         .arg(query);
     let out = cmd.output().await.unwrap();
-    
+
     // let error = String::from_utf8(out.stderr).unwrap();
     // println!("youtube-dl returned {}, err {}", &result, &error);
     String::from_utf8(out.stdout).unwrap()
@@ -429,7 +427,7 @@ pub async fn get_pcm_reader(
         None => return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string()),
     };
     let buf = BufReader::with_capacity(16384 * 32 * 32, stdout);
-    let buf = Box::new(BufReaderSeek::new(buf));
+    let buf = Box::new(ReadOnlySource::new(buf));
     println!("ffmpeg complete");
     Ok(buf)
 }

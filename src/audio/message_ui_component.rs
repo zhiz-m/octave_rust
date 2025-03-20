@@ -267,7 +267,7 @@ impl MessageUiComponent {
                     .components(
                         vec![CreateActionRow::InputText(
                             CreateInputText::new(InputTextStyle::Paragraph, "Song query", "song_query")
-                            .placeholder("eg https://open.spotify.com/playlist/XXXXXXXXX or https://www.youtube.com/watch?v=XXXXXXX or arbitrary youtube search query")
+                            .placeholder("eg https://open.spotify.com/playlist/XXXXXXXXX or https://www.youtube.com/watch?v=XXXXXXX")
                             .min_length(1)
                             .max_length(300)
                             .to_owned()

@@ -1,12 +1,16 @@
 use super::work::StreamType;
-use songbird::input::reader::MediaSource;
+use songbird::input::core::io::{MediaSource, ReadOnlySource};
 use std::{
     io::{BufReader, Read, Seek, Write},
+    pin::Pin,
     process::{ChildStdin, ChildStdout, Command, Stdio},
     str,
     time::Instant,
 };
-use tokio::{io::AsyncWriteExt, process::Command as TokioCommand};
+use tokio::{
+    io::{AsyncRead, AsyncSeek, AsyncWriteExt},
+    process::Command as TokioCommand,
+};
 
 #[derive(Clone)]
 struct LoudnormConfig {
@@ -55,7 +59,9 @@ impl<T: Read + Send> Seek for BufReaderSeek<T> {
 
 impl<T: Read + Send> Read for BufReaderSeek<T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.inner.read(buf)
+        let res = self.inner.read(buf);
+        println!("read {:?} bytes", res);
+        res
     }
 }
 
@@ -87,7 +93,7 @@ pub async fn get_pcm_reader_config(
 }
 
 async fn ytdl(query: &str) -> String {
-    let mut cmd = TokioCommand::new("youtube-dl");
+    let mut cmd = TokioCommand::new("yt-dlp");
     let cmd = cmd
         .arg("-x")
         .arg("--skip-download")
@@ -95,7 +101,10 @@ async fn ytdl(query: &str) -> String {
         //.arg("--audio-quality").arg("128k")
         .arg(query);
     let out = cmd.output().await.unwrap();
-    String::from_utf8(out.stdout).unwrap()
+    let result = String::from_utf8(out.stdout).unwrap();
+    // let error = String::from_utf8(out.stderr).unwrap();
+    // println!("youtube-dl returned {}, err {}", &result, &error);
+    result
 }
 /*
 async fn download_audio(mut url: String) -> Result<Vec<u8>, String> {
@@ -363,14 +372,15 @@ pub async fn get_pcm_reader(
                 .arg("-i")
                 .arg(config.src_url.clone())
                 .arg("-f")
-                .arg("s16le")
+                // .arg("s16le")
+                .arg("mp3")
                 //.arg("-af").arg("loudnorm")
                 .arg("-ar")
                 .arg("48000")
                 .arg("-ac")
                 .arg("2")
-                .arg("-acodec")
-                .arg("pcm_f32le")
+                // .arg("-acodec")
+                // .arg("pcm_f32le")
                 .arg("pipe:1")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -383,13 +393,14 @@ pub async fn get_pcm_reader(
             .arg("-af")
             .arg(format!("volume={:.0}dB", config.volume_delta.unwrap()))
             .arg("-f")
-            .arg("s16le")
+            // .arg("s16le")
+            .arg("mp3")
             .arg("-ar")
             .arg("48000")
             .arg("-ac")
             .arg("2")
-            .arg("-acodec")
-            .arg("pcm_f32le")
+            // .arg("-acodec")
+            // .arg("pcm_f32le")
             .arg("pipe:1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -418,8 +429,9 @@ pub async fn get_pcm_reader(
         Some(stdout) => stdout,
         None => return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string()),
     };
-    let buf = BufReader::with_capacity(16384 * 32, stdout);
-    let buf = Box::new(BufReaderSeek::<ChildStdout>::new(buf));
+    let buf = BufReader::with_capacity(16384 * 32 * 32, stdout);
+    let buf = Box::new(BufReaderSeek::new(buf));
+    println!("ffmpeg complete");
     Ok(buf)
 }
 

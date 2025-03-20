@@ -2,7 +2,8 @@ use audio::{
     audio_state::AudioState,
     config::{self, audio::BOT_PREFIX},
 };
-use songbird::SerenityInit;
+use serenity::all::ClientBuilder;
+use songbird::{SerenityInit, Songbird};
 use std::{collections::HashMap, env, sync::Arc};
 use tokio::sync::Mutex;
 use util::send_embed;
@@ -13,7 +14,7 @@ mod util;
 
 use poise::{
     samples::create_application_commands,
-    serenity_prelude::{CacheHttp, Command, CreateApplicationCommands, GatewayIntents, GuildId},
+    serenity_prelude::{CacheHttp, Command, GatewayIntents, GuildId},
     Context as RawPoiseContext,
 };
 
@@ -26,9 +27,13 @@ pub struct Data {
 
 async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
     match error {
-        poise::FrameworkError::Command { error, ctx } => {
-            if let Err(e) =
-                send_embed(ctx.discord().http(), ctx.channel_id(), &error.to_string()).await
+        poise::FrameworkError::Command { error, ctx, .. } => {
+            if let Err(e) = send_embed(
+                ctx.serenity_context().http(),
+                ctx.channel_id(),
+                &error.to_string(),
+            )
+            .await
             {
                 log::error!("Error while sending error embed: {}", e)
             };
@@ -45,7 +50,7 @@ pub fn get_default_guilds() -> Vec<GuildId> {
     if let Ok(guilds) = env::var("OCTAVE_BOT_GUILDS") {
         return guilds
             .split(',')
-            .filter_map(|g| Some(GuildId(g.parse().ok()?)))
+            .filter_map(|g| Some(GuildId::new(g.parse().ok()?)))
             .collect();
     }
     vec![]
@@ -56,7 +61,6 @@ async fn main() {
     logger::init_logger().expect("failed to init logger");
     let mut commands = vec![];
     audio::add_group(&mut commands);
-    let cmd_builder = create_application_commands(&commands);
     let options = poise::FrameworkOptions {
         commands,
         on_error: |error| Box::pin(on_error(error)),
@@ -68,38 +72,29 @@ async fn main() {
         },
         ..Default::default()
     };
-    poise::Framework::builder()
-        .token(env::var("OCTAVE_BOT_TOKEN").expect("Error: token not found"))
+    let framework = poise::Framework::builder()
         .options(options)
-        .intents(
-            GatewayIntents::GUILD_MESSAGES
-                | GatewayIntents::GUILD_VOICE_STATES
-                | GatewayIntents::MESSAGE_CONTENT
-                | GatewayIntents::GUILDS,
-        )
-        .user_data_setup(|ctx, _, _| {
+        .setup(|ctx, _, framework| {
             Box::pin(async move {
-                for guild in ctx.cache.guilds() {
-                    guild
-                        .set_application_commands(ctx.http(), |commands| {
-                            *commands = cmd_builder.clone();
-                            commands
-                        })
-                        .await?;
-                }
-                Command::set_global_application_commands(ctx.http(), |commands| {
-                    *commands = CreateApplicationCommands::default();
-                    commands
-                })
-                .await?;
-                //
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {
                     audio_states: Mutex::new(HashMap::new()),
                 })
             })
         })
-        .client_settings(|b| b.register_songbird())
-        .run()
-        .await
-        .expect("client error");
+        .build();
+    let token = env::var("OCTAVE_BOT_TOKEN").expect("Error: token not found");
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::GUILD_VOICE_STATES
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILDS;
+    let client = ClientBuilder::new(token, intents)
+        .framework(framework)
+        .register_songbird()
+        .await;
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
+    client.unwrap().start().await.unwrap()
 }

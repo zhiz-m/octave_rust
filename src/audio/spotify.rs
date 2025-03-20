@@ -2,8 +2,8 @@ use anyhow::Context;
 use rspotify::{
     clients::BaseClient,
     model::{
-        AlbumId, ArtistId, Country, FullTrack, Id, Market, PlayableItem, PlaylistId,
-        SimplifiedTrack, TrackId,
+        AlbumId, ArtistId, Country, FullTrack, Market, PlayableItem, PlaylistId, SimplifiedTrack,
+        TrackId,
     },
     ClientCredsSpotify, Credentials,
 };
@@ -45,10 +45,10 @@ impl TrackObject {
             TrackObject::SimplifiedTrack(track) => &track.name,
         }
     }
-    fn duration(&self) -> u64 {
+    fn duration(&self) -> i64 {
         match self {
-            TrackObject::FullTrack(track) => track.duration.as_secs(),
-            TrackObject::SimplifiedTrack(track) => track.duration.as_secs(),
+            TrackObject::FullTrack(track) => track.duration.num_seconds(),
+            TrackObject::SimplifiedTrack(track) => track.duration.num_seconds(),
         }
     }
     fn album_id(&self) -> Option<&AlbumId> {
@@ -75,7 +75,7 @@ impl SpotifyClient {
             "5f573c9620494bae87890c0f08a60293",
             "212476d9b0f3472eaa762d90b19b0ba8",
         );
-        let mut spotify = ClientCredsSpotify::new(creds);
+        let spotify = ClientCredsSpotify::new(creds);
         spotify.request_token().await?;
         Ok(SpotifyClient { client: spotify })
     }
@@ -92,7 +92,7 @@ impl SpotifyClient {
                 artist: Some(artist.to_string()),
                 title: Some(title.to_string()),
                 youtube_url: None,
-                duration: Some(track.duration()),
+                duration: Some(track.duration() as u64),
             };
             match Song::new_load(metadata, stream_type) {
                 Some(data) => songs.push(data),
@@ -103,7 +103,7 @@ impl SpotifyClient {
     }
     pub async fn get_playlist(&self, playlist_id: &str) -> anyhow::Result<Vec<TrackObject>> {
         let playlist_id = PlaylistId::from_id(playlist_id)?;
-        let tracks = self.client.playlist(&playlist_id, None, None).await?;
+        let tracks = self.client.playlist(playlist_id, None, None).await?;
         let items = tracks.tracks.items;
         let mut tracks = vec![];
         for data in items.into_iter() {
@@ -118,13 +118,13 @@ impl SpotifyClient {
     }
     pub async fn get_track(&self, track_id: &str) -> anyhow::Result<TrackObject> {
         let track_id = TrackId::from_id(track_id)?;
-        let track = self.client.track(&track_id).await?;
+        let track = self.client.track(track_id, None).await?;
         Ok(TrackObject::FullTrack(Box::new(track)))
     }
-    async fn random_from_artist(&self, id: &ArtistId) -> anyhow::Result<TrackObject> {
+    async fn random_from_artist(&self, id: ArtistId<'_>) -> anyhow::Result<TrackObject> {
         let tracks = self
             .client
-            .artist_top_tracks(id, &Market::Country(Country::Japan))
+            .artist_top_tracks(id, Some(Market::Country(Country::Japan)))
             .await?;
         Ok(TrackObject::FullTrack(Box::new(
             tracks
@@ -133,8 +133,8 @@ impl SpotifyClient {
                 .context("returned tracks was empty")?,
         )))
     }
-    async fn random_from_album(&self, id: &AlbumId) -> anyhow::Result<TrackObject> {
-        let album = self.client.album(id).await?;
+    async fn random_from_album(&self, id: AlbumId<'_>) -> anyhow::Result<TrackObject> {
+        let album = self.client.album(id, None).await?;
         Ok(TrackObject::SimplifiedTrack(Box::new(
             album
                 .tracks
@@ -163,7 +163,7 @@ impl SpotifyClient {
                 let track = &tracks[ind];
 
                 let weights = [sr::SAME_ARTIST, sr::EXPLORE_ALBUM, sr::EXPLORE_ARTIST];
-                let option = WeightedIndex::new(&weights)
+                let option = WeightedIndex::new(weights)
                     .unwrap()
                     .sample(&mut rand::thread_rng());
 
@@ -171,20 +171,21 @@ impl SpotifyClient {
                     // find random song from track artist
                     0 => {
                         let artist = track.artist_id().context("failed to find artist")?;
-                        client.random_from_artist(artist).await
+                        client.random_from_artist(artist.clone()).await
                     }
                     // find random song from track album
                     1 => {
                         let album = track.album_id().context("album not found")?;
-                        client.random_from_album(album).await
+                        client.random_from_album(album.clone()).await
                     }
                     // find random song from a random similar artist
                     _ => {
-                        let artist = track.artist_id().context("failed to find artist")?;
-                        let artists = client.client.artist_related_artists(artist).await?;
-                        let artists = artists[..5].to_vec();
-                        let id = &artists.iter().choose(&mut rand::thread_rng()).unwrap().id;
-                        client.random_from_artist(id).await
+                        Err(anyhow::anyhow!("spotdl: unsupported"))
+                        // let artist = track.artist_id().context("failed to find artist")?;
+                        // let artists = client.client.artist_related_artists(artist).await?;
+                        // let artists = artists[..5].to_vec();
+                        // let id = &artists.iter().choose(&mut rand::thread_rng()).unwrap().id;
+                        // client.random_from_artist(id).await
                     }
                 }
             });

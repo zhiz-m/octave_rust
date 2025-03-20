@@ -1,17 +1,13 @@
 use poise::serenity_prelude::{ChannelId, CreateEmbed, Http};
+use serenity::all::CreateMessage;
 
-pub fn get_styled_embed<'a>(e: &'a mut CreateEmbed, text: &str) -> &'a mut CreateEmbed {
-    e.colour(0xf542bf);
-    e.description(text);
-    e
+pub fn get_styled_embed(text: &str) -> CreateEmbed {
+    CreateEmbed::new().colour(0xf542bf).description(text)
 }
 
 pub async fn send_embed(http: &Http, channel_id: ChannelId, text: &str) -> anyhow::Result<()> {
     channel_id
-        .send_message(http, |m| {
-            m.embed(|e| get_styled_embed(e, text));
-            m
-        })
+        .send_message(http, CreateMessage::new().add_embed(get_styled_embed(text)))
         .await?;
     Ok(())
 }

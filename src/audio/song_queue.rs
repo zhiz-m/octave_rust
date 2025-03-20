@@ -49,7 +49,7 @@ impl SongQueue {
     }
     pub async fn shuffle(&self) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().await;
-        if queue.len() == 0 {
+        if queue.is_empty() {
             return Err(anyhow!("queue is empty"));
         }
         queue.make_contiguous().shuffle(&mut rand::thread_rng());
@@ -90,7 +90,7 @@ impl SongQueue {
     }
     pub async fn get_string(&self) -> String {
         let queue = self.queue.lock().await;
-        if queue.len() == 0 {
+        if queue.is_empty() {
             return "*empty*".to_string();
         };
         let mut s = String::new();

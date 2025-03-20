@@ -20,10 +20,19 @@ use super::{
     subprocess::get_pcm_reader,
     work::StreamType,
 };
-use poise::serenity_prelude::{ChannelId, Context, Mutex as SerenityMutex};
+use poise::serenity_prelude::{ChannelId, Context};
 use songbird::{
-    input::{self, reader::Reader},
-    tracks::{TrackCommand, TrackHandle},
+    error::TrackResult,
+    input::{
+        self,
+        core::{
+            codecs::CodecType,
+            io::{MediaSourceStream, MediaSourceStreamOptions},
+            probe::Hint,
+        },
+        AudioStream, LiveInput,
+    },
+    tracks::TrackHandle,
     Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent,
 };
 use tokio::{
@@ -33,7 +42,7 @@ use tokio::{
 
 pub struct AudioState {
     queue: SongQueue,
-    handler: Arc<SerenityMutex<Call>>,
+    handler: Arc<Mutex<Call>>,
     current_song: Mutex<Option<Song>>,
     track_handle: Mutex<Option<TrackHandle>>,
     is_looping: Mutex<bool>,
@@ -48,7 +57,7 @@ pub struct AudioState {
 }
 
 impl AudioState {
-    pub fn new(handler: Arc<SerenityMutex<Call>>, ctx: &PoiseContext<'_>) -> Arc<AudioState> {
+    pub fn new(handler: Arc<Mutex<Call>>, ctx: &PoiseContext<'_>) -> Arc<AudioState> {
         let audio_state = AudioState {
             queue: SongQueue::new(),
             handler,
@@ -60,7 +69,7 @@ impl AudioState {
             is_paused: AtomicBool::new(false),
 
             channel_id: Mutex::new(ctx.channel_id()),
-            context: Mutex::new(Arc::new(ctx.discord().clone())),
+            context: Mutex::new(Arc::new(ctx.serenity_context().clone())),
 
             message_ui_component: Mutex::new(None),
         };
@@ -74,14 +83,14 @@ impl AudioState {
         audio_state
     }
 
-    pub async fn set_context<'a>(&self, ctx: &PoiseContext<'a>) {
+    pub async fn set_context(&self, ctx: &PoiseContext<'_>) {
         {
             let mut channel_id = self.channel_id.lock().await;
             *channel_id = ctx.channel_id();
         }
         {
             let mut context = self.context.lock().await;
-            *context = Arc::new(ctx.discord().clone());
+            *context = Arc::new(ctx.serenity_context().clone());
         }
     }
 
@@ -141,12 +150,17 @@ impl AudioState {
                     continue;
                 }
             };
-            let reader = Reader::Extension(source);
-            let source = input::Input::float_pcm(true, reader);
+            let input = input::Input::Live(
+                LiveInput::Wrapped(AudioStream {
+                    input: MediaSourceStream::new(source, MediaSourceStreamOptions::default()),
+                    hint: None,
+                }),
+                None,
+            );
 
             let mut handler = self.handler.lock().await;
 
-            let handle = handler.play_source(source);
+            let handle = handler.play_input(input);
 
             if let Err(why) = handle.add_event(
                 Event::Track(TrackEvent::End),
@@ -171,6 +185,7 @@ impl AudioState {
                 {
                     log::error!("Err AudioState::play_audio: {:?}", why);
                 }
+                println!("play audio");
             }
 
             if let Err(why) = self.display_ui().await {
@@ -242,10 +257,13 @@ impl AudioState {
         Ok(())
     }
 
-    pub async fn send_track_command(&self, cmd: TrackCommand) -> anyhow::Result<()> {
+    pub async fn send_track_command<F: Fn(&TrackHandle) -> TrackResult<()>>(
+        &self,
+        cmd: F,
+    ) -> anyhow::Result<()> {
         let track_handle = self.track_handle.lock().await;
         match track_handle.as_ref() {
-            Some(track_handle) => track_handle.send(cmd).map_err(|e| anyhow!(e.to_string())),
+            Some(track_handle) => cmd(track_handle).map_err(|e| anyhow!(e.to_string())),
             None => Err(anyhow!("no song currently playing")),
         }
     }
@@ -255,9 +273,9 @@ impl AudioState {
         let try_pause = try_pause.unwrap_or(!self.is_paused.fetch_xor(true, Ordering::Relaxed));
         // not paused previously
         if try_pause {
-            self.send_track_command(TrackCommand::Pause).await
+            self.send_track_command(TrackHandle::pause).await
         } else {
-            self.send_track_command(TrackCommand::Play).await
+            self.send_track_command(TrackHandle::play).await
         }
     }
 
@@ -280,22 +298,6 @@ impl AudioState {
         let mut is_looping = self.is_looping.lock().await;
         *is_looping = try_loop.unwrap_or(!*is_looping);
         Ok(*is_looping)
-        /*
-        if looping{
-            if *is_looping{
-                Err("already looping".to_string())
-            }else{
-                *is_looping = true;
-                Ok(())
-            }
-        }else{
-            if !*is_looping{
-                Err("not looping at the moment".to_string())
-            }else{
-                *is_looping = false;
-                Ok(())
-            }
-        }*/
     }
 
     pub async fn change_stream_type(&self, stream_type: &str) -> anyhow::Result<()> {
@@ -340,6 +342,7 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        println!("song ended");
         log::info!("song ended, {:?}", SystemTime::now());
         self.audio_state.play_next_song();
 

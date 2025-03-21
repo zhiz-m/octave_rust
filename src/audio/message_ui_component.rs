@@ -28,16 +28,21 @@ use serenity::all::{
 use songbird::tracks::TrackHandle;
 use tokio::{sync::Mutex, time::timeout};
 
-use super::audio_state::AudioState;
+use super::{audio_state::AudioState, types::{StreamType, QueuePosition}};
 
+#[derive(Clone, Copy)]
 struct UserState {
     should_shuffle: bool,
+    stream_type: StreamType,
+    queue_position: QueuePosition
 }
 
 impl Default for UserState {
     fn default() -> Self {
         Self {
             should_shuffle: true,
+            stream_type: StreamType::Loudnorm,
+            queue_position: QueuePosition::default(),
         }
     }
 }
@@ -97,6 +102,34 @@ impl MessageUiComponent {
                     ],
                 },
             )),
+            CreateActionRow::SelectMenu(CreateSelectMenu::new(
+                "enable_loudnorm",
+                CreateSelectMenuKind::String {
+                    options: vec![
+                        CreateSelectMenuOption::new("Enable volume normalization: yes", "t")
+                            .default_selection(true)
+                            .to_owned(),
+                        CreateSelectMenuOption::new("Enable volume normalization: no", "f")
+                            .default_selection(false)
+                            .to_owned(),
+                    ],
+                },
+            )),
+                        CreateActionRow::SelectMenu(
+                            CreateSelectMenu::new(
+                                "queue_position",
+                                CreateSelectMenuKind::String {
+                                    options: vec![
+                                        CreateSelectMenuOption::new("Initial queue position: front", "t")
+                                            .default_selection(true)
+                                            .to_owned(),
+                                        CreateSelectMenuOption::new("Initial queue position: back", "f")
+                                            .default_selection(false)
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                        ),
             CreateActionRow::Buttons(vec![
                 CreateButton::new("add_songs")
                     .emoji('🎶')
@@ -260,6 +293,42 @@ impl MessageUiComponent {
                 };
                   mci.defer(context).await?;
             }
+            "enable_loudnorm" => {
+                let selections = match &mci.data.kind {
+                    ComponentInteractionDataKind::StringSelect { values } => values,
+                    other => panic!("unexpected selection {:#?}", other),
+                };
+                let user_id = mci.user.id;
+                let mut user_state_map = user_state_map.lock().await;
+                let user_state = match user_state_map.entry(user_id) {
+                    Entry::Occupied(e) => e.into_mut(),
+                    Entry::Vacant(e) => e.insert(UserState::default()),
+                };
+                match selections.iter().next().context("no selections")?.as_str() {
+                    "t" => user_state.stream_type = StreamType::Loudnorm,
+                    "f" => user_state.stream_type = StreamType::Online,
+                    _ => unreachable!(),
+                };
+                  mci.defer(context).await?;
+            }
+            "queue_position" => {
+                let selections = match &mci.data.kind {
+                    ComponentInteractionDataKind::StringSelect { values } => values,
+                    other => panic!("unexpected selection {:#?}", other),
+                };
+                let user_id = mci.user.id;
+                let mut user_state_map = user_state_map.lock().await;
+                let user_state = match user_state_map.entry(user_id) {
+                    Entry::Occupied(e) => e.into_mut(),
+                    Entry::Vacant(e) => e.insert(UserState::default()),
+                };
+                match selections.iter().next().context("no selections")?.as_str() {
+                    "t" => user_state.queue_position = QueuePosition::Front,
+                    "f" => user_state.queue_position = QueuePosition::Back ,
+                    _ => unreachable!(),
+                };
+                  mci.defer(context).await?;
+            }
             "add_songs" => {
                 mci.create_response(context, CreateInteractionResponse::Modal(
                     CreateModal::new("song_query_modal", "Song query")
@@ -271,7 +340,9 @@ impl MessageUiComponent {
                             .min_length(1)
                             .max_length(300)
                             .to_owned()
-                        )])
+                        )
+                        
+                        ])
                         
                   )
                 ).await?;
@@ -319,13 +390,10 @@ impl MessageUiComponent {
         };
         let user_id = mci.user.id;
         let user_state_map = user_state_map.lock().await;
-        let shuffle = match user_state_map.get(&user_id) {
-            Some(state) => state.should_shuffle,
-            None => true,
-        };
+        let user_state = user_state_map.get(&user_id).cloned().unwrap_or_default() ;
         if let Some(query) =
             query {
-                audio_state.add_audio(query, shuffle).await?;
+                audio_state.add_audio(query, user_state.queue_position, user_state.should_shuffle, user_state.stream_type).await?;
                 mci.create_response(
                     context,
                     CreateInteractionResponse::Message(

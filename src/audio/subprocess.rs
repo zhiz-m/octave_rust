@@ -1,13 +1,17 @@
-use super::work::StreamType;
+use super::types::StreamType;
+use anyhow::Context;
 use songbird::input::core::io::MediaSource;
 use std::{
-    io::{BufReader, Write},
-    process::{ChildStdin, Command, Stdio},
+    io::{BufReader, Cursor},
+    process::{Command, Stdio},
     str,
     time::Instant,
 };
 use symphonia::core::io::ReadOnlySource;
-use tokio::{io::AsyncWriteExt, process::Command as TokioCommand};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::{ChildStdin, Command as TokioCommand},
+};
 
 #[derive(Clone)]
 struct LoudnormConfig {
@@ -20,7 +24,7 @@ struct LoudnormConfig {
 #[derive(Clone)]
 pub struct PcmReaderConfig {
     buf: Option<Vec<u8>>,
-    volume_delta: Option<f64>,
+    // volume_delta: Option<f64>,
     stream_type: StreamType,
     src_url: String,
 }
@@ -65,12 +69,12 @@ pub struct PcmReaderConfig {
 pub async fn get_pcm_reader_config(
     youtube_url: &str,
     stream_type: StreamType,
-) -> Result<PcmReaderConfig, String> {
+) -> anyhow::Result<PcmReaderConfig> {
     let src_url = ytdl(youtube_url).await;
     match stream_type {
         StreamType::Online => Ok(PcmReaderConfig {
             buf: None,
-            volume_delta: None,
+            // volume_delta: None,
             stream_type,
             src_url,
         }),
@@ -78,10 +82,10 @@ pub async fn get_pcm_reader_config(
             let buf = download_audio_buf(src_url.clone()).await?;
             let loudnorm = get_loudnorm_params(&buf).await?;
             let buf = ffmpeg_loudnorm_convert(buf, loudnorm).await?;
-            let volume_delta = ffmpeg_get_volume(&buf).await?;
+            // let volume_delta = ffmpeg_get_volume(&buf).await?;
             Ok(PcmReaderConfig {
                 buf: Some(buf),
-                volume_delta: Some(volume_delta),
+                // volume_delta: Some(volume_delta),
                 stream_type,
                 src_url,
             })
@@ -123,7 +127,11 @@ async fn download_audio(mut url: String) -> Result<Vec<u8>, String> {
     }
 }
 */
-async fn download_audio_buf(url: String) -> Result<Vec<u8>, String> {
+
+// static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+//todo: do this in-process using HLS
+async fn download_audio_buf(url: String) -> anyhow::Result<Vec<u8>> {
     let now = Instant::now();
     let mut cmd = TokioCommand::new("ffmpeg");
     let out = cmd
@@ -145,7 +153,7 @@ async fn download_audio_buf(url: String) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
-async fn get_loudnorm_params(buf: &[u8]) -> Result<LoudnormConfig, String> {
+async fn get_loudnorm_params(buf: &[u8]) -> anyhow::Result<LoudnormConfig> {
     let mut cmd = TokioCommand::new("ffmpeg");
     let cmd = cmd
         .arg("-f")
@@ -163,23 +171,20 @@ async fn get_loudnorm_params(buf: &[u8]) -> Result<LoudnormConfig, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(why) => return Err(why.to_string()),
-    };
+    let mut child = cmd.spawn().context("failed to spawn child")?;
     let stdin = child.stdin.as_mut().unwrap();
     if let Err(x) = stdin.write_all(buf).await {
         log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
     };
 
-    let out = match child.wait_with_output().await {
-        Ok(out) => out,
-        Err(why) => return Err(why.to_string()),
-    };
+    let out = child
+        .wait_with_output()
+        .await
+        .context("failed to wait for child stdout")?;
     parse_loudnorm_params(str::from_utf8(&out.stderr).unwrap())
 }
 
-fn parse_loudnorm_params(buf: &str) -> Result<LoudnormConfig, String> {
+fn parse_loudnorm_params(buf: &str) -> anyhow::Result<LoudnormConfig> {
     let res = LoudnormConfig {
         integrated: _parse_loudnorm_params(buf, "Input Integrated:")?,
         true_peak: _parse_loudnorm_params(buf, "Input True Peak:")?,
@@ -189,11 +194,11 @@ fn parse_loudnorm_params(buf: &str) -> Result<LoudnormConfig, String> {
     Ok(res)
 }
 
-fn _parse_loudnorm_params(buf: &str, target: &str) -> Result<f64, String> {
+fn _parse_loudnorm_params(buf: &str, target: &str) -> anyhow::Result<f64> {
     let split = match buf.split(target).nth(1) {
         Some(split) => split,
         None => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(
                 "subprocess:: _parse_loudnorm_params failed to find substring {}",
                 target
             ))
@@ -202,14 +207,14 @@ fn _parse_loudnorm_params(buf: &str, target: &str) -> Result<f64, String> {
 
     match split.split(' ').find(|&x| !x.is_empty()) {
         Some(res) => Ok(res.parse::<f64>().unwrap()),
-        None => Err(format!(
+        None => Err(anyhow::anyhow!(
             "subprocess:: _parse_loudnorm_params failed to find item value for {}",
             target
         )),
     }
 }
 
-async fn ffmpeg_get_volume(buf: &[u8]) -> Result<f64, String> {
+async fn ffmpeg_get_volume(buf: &[u8]) -> anyhow::Result<f64> {
     let mut cmd = TokioCommand::new("ffmpeg");
     let cmd = cmd
         .arg("-f")
@@ -227,39 +232,32 @@ async fn ffmpeg_get_volume(buf: &[u8]) -> Result<f64, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(why) => return Err(why.to_string()),
-    };
+    let mut child = cmd.spawn().context("failed to spawn child")?;
     let stdin = child.stdin.as_mut().unwrap();
 
     if let Err(why) = stdin.write_all(buf).await {
         log::warn!("warning: subprocess::ffmpeg_get_volume error: {}", why);
     };
 
-    let out = match child.wait_with_output().await {
-        Ok(out) => out,
-        Err(why) => return Err(why.to_string()),
-    };
-
-    let out = match str::from_utf8(&out.stderr) {
-        Ok(out) => out,
-        Err(why) => return Err(why.to_string()),
-    };
-
-    let split = match out.split("max_volume: ").nth(1) {
-        Some(split) => split,
-        None => return Err("ffmpeg volumedetect output not recognised".to_string()),
-    };
-
+    let out = child
+        .wait_with_output()
+        .await
+        .context("failed to wait for child output")?;
+    let out = str::from_utf8(&out.stderr).context("failed to parse str from utf8")?;
+    let split = out
+        .split("max_volume: ")
+        .nth(1)
+        .context("ffmpeg volumedetect output not recognised")?;
     match split.split(' ').next() {
         Some(vol) => Ok(-(vol.parse::<f64>().unwrap())),
-        None => Err("ffmpeg volumedetect output failed to parse as integer".to_string()),
+        None => Err(anyhow::anyhow!(
+            "ffmpeg volumedetect output failed to parse as integer".to_string()
+        )),
     }
 }
 
-fn pipe_stdin(buf: &[u8], mut pipe: ChildStdin) {
-    if let Err(x) = pipe.write_all(buf) {
+async fn pipe_stdin(buf: &[u8], mut pipe: ChildStdin) {
+    if let Err(x) = pipe.write_all(buf).await {
         log::warn!("Warning: subprocess::pipe_stdin error: {}", x);
     };
 }
@@ -267,13 +265,11 @@ fn pipe_stdin(buf: &[u8], mut pipe: ChildStdin) {
 async fn ffmpeg_loudnorm_convert(
     buf: Vec<u8>,
     loudnorm: LoudnormConfig,
-) -> Result<Vec<u8>, String> {
+) -> anyhow::Result<Vec<u8>> {
     let loudnorm_string = format!("loudnorm=I=-16:LRA=11:TP=-1.5:measured_I={:.2}:measured_LRA={:.2}:measured_TP={:.2}:measured_thresh={:.2}", 
         loudnorm.integrated, loudnorm.lra, loudnorm.true_peak, loudnorm.threshold);
     let mut cmd = TokioCommand::new("ffmpeg");
     let cmd = cmd
-        .arg("-f")
-        .arg("mp3")
         .arg("-i")
         .arg("pipe:0")
         .arg("-af")
@@ -281,26 +277,42 @@ async fn ffmpeg_loudnorm_convert(
         .arg("-vn")
         .arg("-sn")
         .arg("-dn")
+        .arg("-ar")
+        .arg("48000")
+        .arg("-ac")
+        .arg("2")
         .arg("-f")
         .arg("mp3")
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(why) => return Err(why.to_string()),
-    };
-    let stdin = child.stdin.as_mut().unwrap();
-    if let Err(x) = stdin.write_all(&buf).await {
-        log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
-    };
+        .stderr(Stdio::inherit());
+    let child = cmd.spawn().context("failed to spawn child")?;
+    let mut stdin = child.stdin.unwrap();
+    {
+        let future = async move {
+            if let Err(x) = stdin
+                .write_all(&buf)
+                .await
+                .context("failed to write data to buffer")
+            {
+                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
+            };
+            if let Err(x) = stdin.shutdown().await.context("failed to shutdown stdin") {
+                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
+            };
+        };
+        tokio::task::spawn(future);
+    }
 
-    let out = match child.wait_with_output().await {
-        Ok(out) => out,
-        Err(why) => return Err(why.to_string()),
-    };
-    Ok(out.stdout)
+    let mut buf = vec![];
+    child
+        .stdout
+        .unwrap()
+        .read_to_end(&mut buf)
+        .await
+        .context("failed to fetch output from child")?;
+    Ok(buf)
 }
 
 /*fn ffmpeg_pcm_loudnorm(
@@ -355,12 +367,13 @@ async fn ffmpeg_loudnorm_convert(
 
 // for loudnorm, requires existing, downloaded buffer
 pub async fn get_pcm_reader(
-    config: PcmReaderConfig,
+    mut config: PcmReaderConfig,
 ) -> Result<Box<dyn MediaSource + Send>, String> {
     let mut cmd = Command::new("ffmpeg");
-    let cmd = match config.stream_type {
+    let buf: Box<dyn MediaSource + Send> = match config.stream_type {
         StreamType::Online => {
-            cmd.arg("-reconnect")
+            let cmd = cmd
+                .arg("-reconnect")
                 .arg("1")
                 .arg("-reconnect_streamed")
                 .arg("1")
@@ -380,55 +393,49 @@ pub async fn get_pcm_reader(
                 // .arg("pcm_f32le")
                 .arg("pipe:1")
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::null());
+            let child = match cmd.spawn() {
+                Ok(child) => child,
+                Err(error) => {
+                    return Err(format!("{}", error));
+                }
+            };
+
+            let stdout = match child.stdout {
+                Some(stdout) => stdout,
+                None => {
+                    return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string())
+                }
+            };
+            let buf = BufReader::with_capacity(16384 * 32 * 32, stdout);
+            Box::new(ReadOnlySource::new(buf))
         }
-        StreamType::Loudnorm => cmd
-            .arg("-f")
-            .arg("mp3")
-            .arg("-i")
-            .arg("pipe:0")
-            .arg("-af")
-            .arg(format!("volume={:.0}dB", config.volume_delta.unwrap()))
-            .arg("-f")
-            // .arg("s16le")
-            .arg("mp3")
-            .arg("-ar")
-            .arg("48000")
-            .arg("-ac")
-            .arg("2")
-            // .arg("-acodec")
-            // .arg("pcm_f32le")
-            .arg("pipe:1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null()),
-    };
-
-    let child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            return Err(format!("{}", error));
+        //todo: consider whether one-pass loudnorm is enough. that way we can cut-through stream audio for loudnorm instead of downloading all at once.
+        StreamType::Loudnorm => {
+            // cmd
+            //     .arg("-f")
+            //     .arg("mp3")
+            //     .arg("-i")
+            //     .arg("pipe:0")
+            //     .arg("-af")
+            //     .arg(format!("volume={:.0}dB", config.volume_delta.unwrap()))
+            //     .arg("-f")
+            //     // .arg("s16le")
+            //     .arg("mp3")
+            //     .arg("-ar")
+            //     .arg("48000")
+            //     .arg("-ac")
+            //     .arg("2")
+            //     // .arg("-acodec")
+            //     // .arg("pcm_f32le")
+            //     .arg("pipe:1")
+            //     .stdin(Stdio::piped())
+            //     .stdout(Stdio::piped())
+            //     .stderr(Stdio::null()),
+            let reader = Cursor::new(config.buf.take().unwrap());
+            Box::new(ReadOnlySource::new(reader))
         }
     };
-
-    if let StreamType::Loudnorm = config.stream_type {
-        let stdin = match child.stdin {
-            Some(stdin) => stdin,
-            None => return Err("subprocess::ffmpeg_pcm: failed to get child stdin".to_string()),
-        };
-
-        tokio::task::spawn_blocking(move || {
-            pipe_stdin(config.buf.unwrap().as_ref(), stdin);
-        });
-    }
-
-    let stdout = match child.stdout {
-        Some(stdout) => stdout,
-        None => return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string()),
-    };
-    let buf = BufReader::with_capacity(16384 * 32 * 32, stdout);
-    let buf = Box::new(ReadOnlySource::new(buf));
-    println!("ffmpeg complete");
     Ok(buf)
 }
 

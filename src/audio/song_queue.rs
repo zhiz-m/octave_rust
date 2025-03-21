@@ -1,14 +1,14 @@
 use super::{
     song::{Song, SongBufConfigState},
-    work::Work,
-    youtube_loader::YoutubeLoader,
+    song_loader::SongLoader,
+    types::{QueuePosition, Work},
 };
 use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use std::{cmp::min, collections::VecDeque, mem::drop, sync::Arc};
 use tokio::sync::{Mutex, Semaphore};
 pub struct SongQueue {
-    loader: Arc<Mutex<YoutubeLoader>>,
+    loader: Arc<Mutex<SongLoader>>,
     queue: Arc<Mutex<VecDeque<Song>>>,
     queue_sem: Semaphore,
 }
@@ -16,21 +16,30 @@ pub struct SongQueue {
 impl SongQueue {
     pub fn new() -> SongQueue {
         SongQueue {
-            loader: Arc::new(Mutex::new(YoutubeLoader::new())),
+            loader: Arc::new(Mutex::new(SongLoader::new())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             queue_sem: Semaphore::new(0),
         }
     }
-    pub async fn push(&self, songs: Vec<(Song, Option<Work>)>) -> anyhow::Result<()> {
+    pub async fn push(
+        &self,
+        mut songs: Vec<(Song, Option<Work>)>,
+        queue_position: QueuePosition,
+    ) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().await;
         let count = songs.len();
         let loader = self.loader.lock().await;
+        if let QueuePosition::Front = queue_position {
+            songs.reverse();
+        };
         for item in songs.into_iter() {
-            queue.push_back(item.0);
+            match queue_position {
+                QueuePosition::Back => queue.push_back(item.0),
+                QueuePosition::Front => queue.push_front(item.0),
+            }
             if let Some(work) = item.1 {
-                loader.add_work(work).await?;
+                loader.add_work(work, queue_position).await?;
             };
-            //self.loader.add_work(item.1).await;
         }
         drop(queue);
         self.queue_sem.add_permits(count);
@@ -59,7 +68,9 @@ impl SongQueue {
 
         for song in queue.iter() {
             match &song.buf_config_state {
-                SongBufConfigState::Proc { work, .. } => loader.add_work(work.clone()).await,
+                SongBufConfigState::Proc { work, .. } => {
+                    loader.add_work(work.clone(), QueuePosition::Back).await
+                }
             }?;
         }
 
@@ -70,17 +81,12 @@ impl SongQueue {
             self.pop().await;
         }
         self.reset_loader().await?;
-        /*let mut queue = self.queue.lock().await;
-        if queue.len() == 0 {
-            return Err("queue is empty".to_string());
-        };
-        queue.clear();*/
         Ok(())
     }
     async fn reset_loader(&self) -> anyhow::Result<()> {
         let mut loader = self.loader.lock().await;
         loader.cleanup().await?;
-        *loader = YoutubeLoader::new();
+        *loader = SongLoader::new();
         Ok(())
     }
     pub async fn cleanup(&self) -> anyhow::Result<()> {

@@ -11,14 +11,14 @@ use std::{
     time::SystemTime,
 };
 
-use super::config::audio as audio_config;
+use super::{config::audio as audio_config, types::QueuePosition};
 use super::{
     message_ui_component::MessageUiComponent,
     song::Song,
     song_queue::SongQueue,
     song_searcher::{process_query, song_recommender},
     subprocess::get_pcm_reader,
-    work::StreamType,
+    types::StreamType,
 };
 use poise::serenity_prelude::{ChannelId, Context};
 use songbird::{
@@ -61,7 +61,7 @@ impl AudioState {
             track_handle: Mutex::new(None),
             is_looping: Mutex::new(false),
             song_ready: Semaphore::new(1),
-            current_stream_type: Mutex::new(StreamType::Online),
+            current_stream_type: Mutex::new(StreamType::Loudnorm),
             is_paused: AtomicBool::new(false),
 
             channel_id: Mutex::new(ctx.channel_id()),
@@ -181,7 +181,6 @@ impl AudioState {
                 {
                     log::error!("Err AudioState::play_audio: {:?}", why);
                 }
-                println!("play audio");
             }
 
             if let Err(why) = self.display_ui().await {
@@ -224,18 +223,29 @@ impl AudioState {
         self.song_ready.add_permits(1);
     }
 
-    pub async fn add_audio(&self, query: &str, shuffle: bool) -> anyhow::Result<()> {
-        let mut songs = process_query(query, *self.current_stream_type.lock().await).await?;
+    pub async fn add_audio(
+        &self,
+        query: &str,
+        queue_position: QueuePosition,
+        shuffle: bool,
+        stream_type: StreamType,
+    ) -> anyhow::Result<()> {
+        let mut songs = process_query(query, stream_type).await?;
         if shuffle {
             songs.shuffle(&mut rand::thread_rng());
         }
-        self.queue.push(songs).await?;
+        // if we're not playing any songs, the first song of a batch will never be loudnormed, since this is slow
+        // let has_current_song = { self.current_song.lock().await.is_some() };
+        // if let (true, Some(work)) = (has_current_song, &mut songs[0].1) {
+        //     work.stream_type = StreamType::Online
+        // }
+        self.queue.push(songs, queue_position).await?;
         Ok(())
     }
 
     pub async fn add_recommended_songs(&self, query: &str, amount: usize) -> anyhow::Result<()> {
         let songs = song_recommender(query, amount, *self.current_stream_type.lock().await).await?;
-        self.queue.push(songs).await?;
+        self.queue.push(songs, QueuePosition::default()).await?;
         Ok(())
     }
 
@@ -249,7 +259,7 @@ impl AudioState {
         .await?;
         songs.extend(recommended_songs);
         songs.shuffle(&mut rand::thread_rng());
-        self.queue.push(songs).await?;
+        self.queue.push(songs, QueuePosition::default()).await?;
         Ok(())
     }
 
@@ -296,20 +306,8 @@ impl AudioState {
         Ok(*is_looping)
     }
 
-    pub async fn change_stream_type(&self, stream_type: &str) -> anyhow::Result<()> {
-        match stream_type.trim().to_lowercase().as_str() {
-            "online" => {
-                *self.current_stream_type.lock().await = StreamType::Online;
-                Ok(())
-            }
-            "loudnorm" => {
-                *self.current_stream_type.lock().await = StreamType::Loudnorm;
-                Ok(())
-            }
-            _ => Err(anyhow!(
-                "Invalid input, accepted args are 'online' and 'loudnorm'"
-            )),
-        }
+    pub async fn change_stream_type(&self, stream_type: StreamType) {
+        *self.current_stream_type.lock().await = stream_type
     }
 
     pub async fn cleanup(&self) -> anyhow::Result<()> {
@@ -338,7 +336,6 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        println!("song ended");
         log::info!("song ended, {:?}", SystemTime::now());
         self.audio_state.play_next_song();
 

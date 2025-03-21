@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use super::{
     song::{Song, SongMetadata},
     spotify::SpotifyClient,
-    work::{StreamType, Work},
+    types::{StreamType, Work},
 };
 
 pub async fn process_query(

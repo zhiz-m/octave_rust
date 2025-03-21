@@ -1,6 +1,9 @@
-use super::audio_state::AudioState;
+use super::{
+    audio_state::AudioState,
+    types::{self, QueuePosition},
+};
 use anyhow::{anyhow, Context};
-use poise::{serenity_prelude::CacheHttp, Command};
+use poise::{serenity_prelude::CacheHttp, ChoiceParameter, Command};
 use songbird::tracks::TrackHandle;
 use std::sync::Arc;
 
@@ -10,6 +13,25 @@ async fn get_audio_state(ctx: &PoiseContext<'_>) -> anyhow::Result<Arc<AudioStat
     // let ctx = Arc::new(ctx.clone());
     let user_id = ctx.author().id;
     let guild_id = ctx.guild_id().context("failed to get guild id")?;
+    let channel_id = ctx
+        .guild()
+        .context("failed to get guild")?
+        .voice_states
+        .get(&user_id)
+        .and_then(|voice_state| voice_state.channel_id);
+    let channel_id = match channel_id {
+        Some(channel_id) => channel_id,
+        None => {
+            send_embed(
+                ctx.http(),
+                ctx.channel_id(),
+                "Error: please be in a voice channel",
+            )
+            .await?;
+            return Err(anyhow!("Error: please be in a voice channel"));
+        }
+    };
+    let manager = songbird::get(ctx.serenity_context()).await.unwrap();
 
     let audio_state = {
         let audio_states = ctx.data().audio_states.lock().await;
@@ -18,31 +40,17 @@ async fn get_audio_state(ctx: &PoiseContext<'_>) -> anyhow::Result<Arc<AudioStat
     };
     match audio_state {
         Some(state) => {
-            let state = state.clone();
-            state.clone().set_context(ctx).await;
+            state.set_context(ctx).await;
+            if let Some(handler) = manager.get(guild_id) {
+                let call = handler.lock().await;
+                if call.current_channel() != Some(channel_id.into()) {
+                    let _ = manager.join(guild_id, channel_id).await?;
+                }
+            }
+
             Ok(state)
         }
         None => {
-            let http = ctx.serenity_context().http.clone();
-            let channel_id = ctx
-                .guild()
-                .context("failed to get guild")?
-                .voice_states
-                .get(&user_id)
-                .and_then(|voice_state| voice_state.channel_id);
-            let channel_id = match channel_id {
-                Some(channel_id) => channel_id,
-                None => {
-                    send_embed(
-                        &http,
-                        ctx.channel_id(),
-                        "Error: please be in a voice channel",
-                    )
-                    .await?;
-                    return Err(anyhow!("Error: please be in a voice channel"));
-                }
-            };
-            let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
             let handle_lock = manager.join(guild_id, channel_id).await?;
             let audio_state = AudioState::new(handle_lock, ctx);
             {
@@ -89,15 +97,36 @@ async fn exit(ctx: PoiseContext<'_>) -> anyhow::Result<(), Error> {
     Ok(())
 }
 
+#[derive(Copy, Clone, ChoiceParameter)]
+enum StreamType {
+    Online,
+    Loudnorm,
+}
+
+impl From<StreamType> for types::StreamType {
+    fn from(val: StreamType) -> Self {
+        match val {
+            StreamType::Online => types::StreamType::Online,
+            StreamType::Loudnorm => types::StreamType::Loudnorm,
+        }
+    }
+}
 /// Play a song or playlist
 #[poise::command(prefix_command, slash_command)]
 async fn play(
     ctx: PoiseContext<'_>,
-    #[description = "shuffle songs?"] b: bool,
+    #[description = "shuffle songs?"] shuffle: bool,
+    #[description = "normalize volume?"] loudnorm: bool,
     #[description = "song/playlist URL or search query"] query: String,
 ) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
-    audio_state.add_audio(&query, b).await?;
+    let loudnorm = match loudnorm {
+        true => types::StreamType::Loudnorm,
+        false => types::StreamType::Online,
+    };
+    audio_state
+        .add_audio(&query, QueuePosition::default(), shuffle, loudnorm)
+        .await?;
     audio_state
         .display_ui_with_poise_context_reply(&ctx)
         .await?;
@@ -202,10 +231,10 @@ async fn looping(
 #[poise::command(prefix_command, slash_command)]
 async fn stream_type(
     ctx: PoiseContext<'_>,
-    #[description = "Allowed values: \"online\" or \"loudnorm\" "] query: String,
+    #[description = "Allowed values: \"online\" or \"loudnorm\" "] query: StreamType,
 ) -> anyhow::Result<(), Error> {
     let audio_state = get_audio_state(&ctx).await?;
-    audio_state.change_stream_type(&query).await?;
+    audio_state.change_stream_type(query.into()).await;
     audio_state
         .display_ui_with_poise_context_reply(&ctx)
         .await?;

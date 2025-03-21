@@ -22,7 +22,7 @@ use tokio::{
 use super::{
     config::spotify_recommend as sr,
     song::{Song, SongMetadata},
-    work::{StreamType, Work},
+    types::{StreamType, Work},
 };
 
 use std::sync::Arc;
@@ -83,23 +83,22 @@ impl SpotifyClient {
         tracks: Vec<TrackObject>,
         stream_type: StreamType,
     ) -> Vec<(Song, Option<Work>)> {
-        let mut songs = vec![];
-        for track in tracks.into_iter() {
-            let artist = track.artist();
-            let title = track.title();
-            let metadata = SongMetadata {
-                search_query: Some(SpotifyClient::get_query_string(artist, title)),
-                artist: Some(artist.to_string()),
-                title: Some(title.to_string()),
-                youtube_url: None,
-                duration: Some(track.duration() as u64),
-            };
-            match Song::new_load(metadata, stream_type) {
-                Some(data) => songs.push(data),
-                None => continue,
-            };
-        }
-        songs
+        tracks
+            .iter()
+            .filter_map(|track| {
+                let artist = track.artist();
+                let title = track.title();
+                let metadata = SongMetadata {
+                    search_query: Some(SpotifyClient::get_query_string(artist, title)),
+                    artist: Some(artist.to_string()),
+                    title: Some(title.to_string()),
+                    youtube_url: None,
+                    duration: Some(track.duration() as u64),
+                };
+
+                Song::new_load(metadata, stream_type)
+            })
+            .collect()
     }
     pub async fn get_playlist(&self, playlist_id: &str) -> anyhow::Result<Vec<TrackObject>> {
         let playlist_id = PlaylistId::from_id(playlist_id)?;

@@ -1,13 +1,12 @@
 use super::{
     subprocess::PcmReaderConfig,
-    work::{StreamType, Work},
+    types::{StreamType, Work},
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 pub enum SongBufConfigState {
     Proc {
-        is_loaded: Arc<Mutex<bool>>,
         receiver: mpsc::Receiver<Option<PcmReaderConfig>>,
         work: Work,
     },
@@ -34,19 +33,17 @@ impl Song {
     ) -> Option<(Song, Option<Work>)> {
         let query = match metadata.youtube_url.clone() {
             Some(url) => url,
-            None => format!("ytsearch:{}", metadata.search_query.clone()?),
+            None => format!("ytsearch:{} official music", metadata.search_query.clone()?),
         };
 
         let (tx, rx) = mpsc::channel(1);
-        let is_loaded = Arc::new(Mutex::new(false));
         let work = Work {
             sender: tx,
-            is_loaded: is_loaded.clone(),
+            is_loaded: Arc::new(Mutex::new(false)),
             query,
             stream_type,
         };
         let buf_config_state = SongBufConfigState::Proc {
-            is_loaded,
             receiver: rx,
             work: work.clone(),
         };
@@ -65,9 +62,7 @@ impl Song {
                 match buf_config.clone() {
                     Some(buf_config) => Some(buf_config),
                     None => {
-                        //drop(url);
                         let source = receiver.recv().await.unwrap();
-                        //let mut url = song.url.lock().unwrap();
                         *buf_config = source;
                         buf_config.clone()
                     }
@@ -96,37 +91,3 @@ impl Song {
         format!("{} by {} | {}", title, artist, &duration)
     }
 }
-
-/*
-async fn send_url(state: &SongUrlState, url: String) {
-    let SongUrlState::Proc{is_loaded, sender, ..} = state;
-    let is_loaded = is_loaded.lock().unwrap();
-    if *is_loaded{
-        return
-    }
-    sender.send(url).await.unwrap();
-}*/
-/*
-async fn hi() -> Song{
-    let (tx, rx) = mpsc::channel::<String>(100);
-    Song{
-        url: "".to_string(),
-        url_state: SongUrlState::Proc{
-            is_loaded: Arc::new(Mutex::new(false)),
-            is_waited: Arc::new(Mutex::new(false)),
-            receiver: rx,
-            //sender: tx,
-        }
-    }
-}*/
-
-/*
-async fn get_url(song: &mut Song) -> &str{
-    let is_waited = song.is_loaded.lock().unwrap();
-    if *is_waited{
-        return &song.url;
-    }
-    let wait_chan = &mut song.wait_chan;
-    song.url = wait_chan.await.unwrap();
-    &song.url
-}*/

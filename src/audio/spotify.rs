@@ -22,7 +22,7 @@ use tokio::{
 use super::{
     config::spotify_recommend as sr,
     song::{Song, SongMetadata},
-    types::{StreamType, Work},
+    types::StreamType,
 };
 
 use std::sync::Arc;
@@ -79,10 +79,7 @@ impl SpotifyClient {
         spotify.request_token().await?;
         Ok(SpotifyClient { client: spotify })
     }
-    pub fn process_track_objects(
-        tracks: Vec<TrackObject>,
-        stream_type: StreamType,
-    ) -> Vec<(Song, Option<Work>)> {
+    pub fn process_track_objects(tracks: Vec<TrackObject>, stream_type: StreamType) -> Vec<Song> {
         tracks
             .iter()
             .filter_map(|track| {

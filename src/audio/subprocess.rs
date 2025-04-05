@@ -1,4 +1,4 @@
-use super::types::StreamType;
+use super::types::{AudioReaderConfig, StreamType};
 use anyhow::Context;
 use songbird::input::core::io::MediaSource;
 use std::{
@@ -10,7 +10,7 @@ use std::{
 use symphonia::core::io::ReadOnlySource;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    process::{ChildStdin, Command as TokioCommand},
+    process::Command as TokioCommand,
 };
 
 #[derive(Clone)]
@@ -21,13 +21,12 @@ struct LoudnormConfig {
     threshold: f64,
 }
 
-#[derive(Clone)]
-pub struct PcmReaderConfig {
-    buf: Option<Vec<u8>>,
-    // volume_delta: Option<f64>,
-    stream_type: StreamType,
-    src_url: String,
-}
+// pub struct AudioReaderConfig {
+//     buf: Option<Vec<u8>>,
+//     // volume_delta: Option<f64>,
+//     stream_type: StreamType,
+//     src_url: String,
+// }
 
 // pub struct BufReaderSeek<T: Read + Send> {
 //     inner: BufReader<T>,
@@ -66,29 +65,19 @@ pub struct PcmReaderConfig {
 //     }
 // }
 
-pub async fn get_pcm_reader_config(
-    youtube_url: &str,
+pub async fn get_audio_reader_config(
+    ytdl_query: &str,
     stream_type: StreamType,
-) -> anyhow::Result<PcmReaderConfig> {
-    let src_url = ytdl(youtube_url).await;
+) -> anyhow::Result<AudioReaderConfig> {
+    let src_url = ytdl(ytdl_query).await;
     match stream_type {
-        StreamType::Online => Ok(PcmReaderConfig {
-            buf: None,
-            // volume_delta: None,
-            stream_type,
-            src_url,
-        }),
+        StreamType::Online => Ok(AudioReaderConfig::Online { src_url }),
         StreamType::Loudnorm => {
             let buf = download_audio_buf(src_url.clone()).await?;
             let loudnorm = get_loudnorm_params(&buf).await?;
             let buf = ffmpeg_loudnorm_convert(buf, loudnorm).await?;
             // let volume_delta = ffmpeg_get_volume(&buf).await?;
-            Ok(PcmReaderConfig {
-                buf: Some(buf),
-                // volume_delta: Some(volume_delta),
-                stream_type,
-                src_url,
-            })
+            Ok(AudioReaderConfig::Loudnorm { buf })
         }
     }
 }
@@ -214,53 +203,53 @@ fn _parse_loudnorm_params(buf: &str, target: &str) -> anyhow::Result<f64> {
     }
 }
 
-async fn ffmpeg_get_volume(buf: &[u8]) -> anyhow::Result<f64> {
-    let mut cmd = TokioCommand::new("ffmpeg");
-    let cmd = cmd
-        .arg("-f")
-        .arg("mp3")
-        .arg("-i")
-        .arg("pipe:0")
-        .arg("-af")
-        .arg("volumedetect")
-        .arg("-vn")
-        .arg("-sn")
-        .arg("-dn")
-        .arg("-f")
-        .arg("mp3")
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    let mut child = cmd.spawn().context("failed to spawn child")?;
-    let stdin = child.stdin.as_mut().unwrap();
+// async fn ffmpeg_get_volume(buf: &[u8]) -> anyhow::Result<f64> {
+//     let mut cmd = TokioCommand::new("ffmpeg");
+//     let cmd = cmd
+//         .arg("-f")
+//         .arg("mp3")
+//         .arg("-i")
+//         .arg("pipe:0")
+//         .arg("-af")
+//         .arg("volumedetect")
+//         .arg("-vn")
+//         .arg("-sn")
+//         .arg("-dn")
+//         .arg("-f")
+//         .arg("mp3")
+//         .arg("-")
+//         .stdin(Stdio::piped())
+//         .stdout(Stdio::null())
+//         .stderr(Stdio::piped());
+//     let mut child = cmd.spawn().context("failed to spawn child")?;
+//     let stdin = child.stdin.as_mut().unwrap();
 
-    if let Err(why) = stdin.write_all(buf).await {
-        log::warn!("warning: subprocess::ffmpeg_get_volume error: {}", why);
-    };
+//     if let Err(why) = stdin.write_all(buf).await {
+//         log::warn!("warning: subprocess::ffmpeg_get_volume error: {}", why);
+//     };
 
-    let out = child
-        .wait_with_output()
-        .await
-        .context("failed to wait for child output")?;
-    let out = str::from_utf8(&out.stderr).context("failed to parse str from utf8")?;
-    let split = out
-        .split("max_volume: ")
-        .nth(1)
-        .context("ffmpeg volumedetect output not recognised")?;
-    match split.split(' ').next() {
-        Some(vol) => Ok(-(vol.parse::<f64>().unwrap())),
-        None => Err(anyhow::anyhow!(
-            "ffmpeg volumedetect output failed to parse as integer".to_string()
-        )),
-    }
-}
+//     let out = child
+//         .wait_with_output()
+//         .await
+//         .context("failed to wait for child output")?;
+//     let out = str::from_utf8(&out.stderr).context("failed to parse str from utf8")?;
+//     let split = out
+//         .split("max_volume: ")
+//         .nth(1)
+//         .context("ffmpeg volumedetect output not recognised")?;
+//     match split.split(' ').next() {
+//         Some(vol) => Ok(-(vol.parse::<f64>().unwrap())),
+//         None => Err(anyhow::anyhow!(
+//             "ffmpeg volumedetect output failed to parse as integer".to_string()
+//         )),
+//     }
+// }
 
-async fn pipe_stdin(buf: &[u8], mut pipe: ChildStdin) {
-    if let Err(x) = pipe.write_all(buf).await {
-        log::warn!("Warning: subprocess::pipe_stdin error: {}", x);
-    };
-}
+// async fn pipe_stdin(buf: &[u8], mut pipe: ChildStdin) {
+//     if let Err(x) = pipe.write_all(buf).await {
+//         log::warn!("Warning: subprocess::pipe_stdin error: {}", x);
+//     };
+// }
 
 async fn ffmpeg_loudnorm_convert(
     buf: Vec<u8>,
@@ -366,12 +355,14 @@ async fn ffmpeg_loudnorm_convert(
 }*/
 
 // for loudnorm, requires existing, downloaded buffer
-pub async fn get_pcm_reader(
-    mut config: PcmReaderConfig,
-) -> Result<Box<dyn MediaSource + Send>, String> {
+pub async fn get_audio_reader(
+    config: AudioReaderConfig,
+) -> anyhow::Result<Box<dyn MediaSource + Send>> {
     let mut cmd = Command::new("ffmpeg");
-    let buf: Box<dyn MediaSource + Send> = match config.stream_type {
-        StreamType::Online => {
+    let buf: Box<dyn MediaSource + Send> = match config {
+        AudioReaderConfig::Online { src_url } => {
+            // songbird supports synchronous IO only, or a synchronous wrapper around async IO,
+            // hence we're not using TokioCommand
             let cmd = cmd
                 .arg("-reconnect")
                 .arg("1")
@@ -380,7 +371,7 @@ pub async fn get_pcm_reader(
                 .arg("-reconnect_delay_max")
                 .arg("5")
                 .arg("-i")
-                .arg(config.src_url.clone())
+                .arg(src_url)
                 .arg("-f")
                 // .arg("s16le")
                 .arg("mp3")
@@ -394,24 +385,16 @@ pub async fn get_pcm_reader(
                 .arg("pipe:1")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
-            let child = match cmd.spawn() {
-                Ok(child) => child,
-                Err(error) => {
-                    return Err(format!("{}", error));
-                }
-            };
+            let child = cmd.spawn().context("failed to spawn child")?;
 
-            let stdout = match child.stdout {
-                Some(stdout) => stdout,
-                None => {
-                    return Err("subprocess::ffmpeg_pcm: failed to get child stdout".to_string())
-                }
-            };
+            let stdout = child
+                .stdout
+                .context("subprocess::get_audio_reader: failed to get child stdout")?;
             let buf = BufReader::with_capacity(16384 * 32 * 32, stdout);
             Box::new(ReadOnlySource::new(buf))
         }
         //todo: consider whether one-pass loudnorm is enough. that way we can cut-through stream audio for loudnorm instead of downloading all at once.
-        StreamType::Loudnorm => {
+        AudioReaderConfig::Loudnorm { buf } => {
             // cmd
             //     .arg("-f")
             //     .arg("mp3")
@@ -432,7 +415,7 @@ pub async fn get_pcm_reader(
             //     .stdin(Stdio::piped())
             //     .stdout(Stdio::piped())
             //     .stderr(Stdio::null()),
-            let reader = Cursor::new(config.buf.take().unwrap());
+            let reader = Cursor::new(buf);
             Box::new(ReadOnlySource::new(reader))
         }
     };

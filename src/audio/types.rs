@@ -1,7 +1,3 @@
-use super::subprocess::PcmReaderConfig;
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
-
 #[derive(Copy, Clone)]
 pub enum QueuePosition {
     Front,
@@ -14,7 +10,7 @@ impl Default for QueuePosition {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum StreamType {
     Online,
     Loudnorm,
@@ -27,9 +23,13 @@ impl Default for StreamType {
 }
 
 #[derive(Clone)]
-pub struct Work {
-    pub sender: mpsc::Sender<Option<PcmReaderConfig>>,
+pub enum AudioReaderConfig {
+    Online { src_url: String },
+    Loudnorm { buf: Vec<u8> },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct SongLoaderWork {
     pub query: String,
-    pub is_loaded: Arc<Mutex<bool>>,
     pub stream_type: StreamType,
 }

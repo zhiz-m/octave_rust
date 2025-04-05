@@ -1,15 +1,8 @@
-use super::{
-    subprocess::PcmReaderConfig,
-    types::{StreamType, Work},
-};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use super::types::{AudioReaderConfig, SongLoaderWork, StreamType};
 
-pub enum SongBufConfigState {
-    Proc {
-        receiver: mpsc::Receiver<Option<PcmReaderConfig>>,
-        work: Work,
-    },
+pub enum SongPlayableState {
+    Waiting { work: SongLoaderWork },
+    Ready { config: AudioReaderConfig },
 }
 
 pub struct SongMetadata {
@@ -21,53 +14,36 @@ pub struct SongMetadata {
 }
 
 pub struct Song {
-    pub buf_config_state: SongBufConfigState,
-    buf_config: Arc<Mutex<Option<PcmReaderConfig>>>,
+    pub state: SongPlayableState,
     metadata: SongMetadata,
 }
 
 impl Song {
-    pub fn new_load(
-        metadata: SongMetadata,
-        stream_type: StreamType,
-    ) -> Option<(Song, Option<Work>)> {
+    pub fn new_load(metadata: SongMetadata, stream_type: StreamType) -> Option<Self> {
         let query = match metadata.youtube_url.clone() {
             Some(url) => url,
             None => format!("ytsearch:{} official music", metadata.search_query.clone()?),
         };
 
-        let (tx, rx) = mpsc::channel(1);
-        let work = Work {
-            sender: tx,
-            is_loaded: Arc::new(Mutex::new(false)),
-            query,
-            stream_type,
-        };
-        let buf_config_state = SongBufConfigState::Proc {
-            receiver: rx,
-            work: work.clone(),
-        };
-
-        let song = Song {
-            buf_config_state,
-            buf_config: Arc::new(Mutex::new(None)),
-            metadata,
-        };
-        Some((song, Some(work)))
+        let work = SongLoaderWork { query, stream_type };
+        let state = SongPlayableState::Waiting { work };
+        let song = Song { state, metadata };
+        Some(song)
     }
-    pub async fn get_buf_config(&mut self) -> Option<PcmReaderConfig> {
-        match &mut self.buf_config_state {
-            SongBufConfigState::Proc { receiver, .. } => {
-                let mut buf_config = self.buf_config.lock().await;
-                match buf_config.clone() {
-                    Some(buf_config) => Some(buf_config),
-                    None => {
-                        let source = receiver.recv().await.unwrap();
-                        *buf_config = source;
-                        buf_config.clone()
-                    }
-                }
-            }
+
+    pub fn get_buf_config(&self) -> Option<AudioReaderConfig> {
+        match &self.state {
+            // SongPlayableState::Proc { receiver, .. } => match &self.buf_config {
+            //     Some(buf_config) => Some(buf_config.clone()),
+            //     None => {
+            //         let source = receiver.recv().await.unwrap();
+            //         self.buf_config = source;
+            //         self.buf_config.clone()
+            //     }
+            // },
+            // todo: potentially unnecessary clone
+            SongPlayableState::Ready { config } => Some(config.clone()),
+            SongPlayableState::Waiting { .. } => None,
         }
     }
     pub async fn get_string(&self) -> String {

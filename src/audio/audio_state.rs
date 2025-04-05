@@ -3,7 +3,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use rand::seq::SliceRandom;
 use std::{
-    mem::drop,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -11,13 +10,13 @@ use std::{
     time::SystemTime,
 };
 
-use super::{config::audio as audio_config, types::QueuePosition};
+use super::{config, types::QueuePosition};
 use super::{
     message_ui_component::MessageUiComponent,
     song::Song,
     song_queue::SongQueue,
     song_searcher::{process_query, song_recommender},
-    subprocess::get_pcm_reader,
+    subprocess::get_audio_reader,
     types::StreamType,
 };
 use poise::serenity_prelude::{ChannelId, Context};
@@ -33,16 +32,17 @@ use songbird::{
 };
 use tokio::{
     sync::{Mutex, Semaphore},
-    time::timeout,
+    time::{sleep_until, Instant},
 };
 
 pub struct AudioState {
     queue: SongQueue,
     handler: Arc<Mutex<Call>>,
     current_song: Mutex<Option<Song>>,
+    next_looping_song_to_play: Mutex<Option<Song>>,
     track_handle: Mutex<Option<TrackHandle>>,
     is_looping: Mutex<bool>,
-    song_ready: Semaphore,
+    // song_ready: Semaphore,
     current_stream_type: Mutex<StreamType>,
     is_paused: AtomicBool,
 
@@ -58,9 +58,10 @@ impl AudioState {
             queue: SongQueue::new(),
             handler,
             current_song: Mutex::new(None),
+            next_looping_song_to_play: Mutex::new(None),
             track_handle: Mutex::new(None),
             is_looping: Mutex::new(false),
-            song_ready: Semaphore::new(1),
+            // song_ready: Semaphore::new(1),
             current_stream_type: Mutex::new(StreamType::Loudnorm),
             is_paused: AtomicBool::new(false),
 
@@ -92,105 +93,81 @@ impl AudioState {
 
     async fn play_audio_loop(self: &Arc<Self>) {
         loop {
-            match timeout(
-                audio_config::TIMEOUT_DURATION,
-                self.clone().song_ready.acquire(),
+            sleep_until(
+                Instant::now()
+                    .checked_add(config::audio::AUDIO_LOOP_POLL_INTERVAL)
+                    .unwrap(),
             )
-            .await
+            .await;
+
             {
-                Ok(x) => {
-                    x.expect(
-                        "Err AudioState::play_audio_loop: failed to acquire song_ready semaphore",
-                    )
-                    .forget();
-                }
-                _ => {
-                    {
-                        let mut handler = self.handler.lock().await;
-                        if handler.leave().await.is_err() {
-                            log::error!("AudioState::play_audio_loop: handler failed to leave");
-                        };
-                    }
-                    if let Err(why) = self.cleanup().await {
-                        log::error!("AudioState::play_audio_loop: {}", why)
-                    }
-                    return;
-                }
-            };
-
-            let is_looping = self.is_looping.lock().await;
-            let mut song = if *is_looping {
-                let mut current_song = self.current_song.lock().await;
-                current_song
-                    .take()
-                    .expect("logical error: expected current_song to be non-empty")
-            } else {
-                self.queue.pop().await
-            };
-            drop(is_looping);
-
-            let buf_config = match song.get_buf_config().await {
-                Some(buf) => buf,
-                None => {
-                    log::error!("AudioState::play_audio: no song buffer found");
-                    self.play_next_song();
+                if self.current_song.lock().await.is_some() {
                     continue;
                 }
-            };
-            let source = get_pcm_reader(buf_config).await;
-            let source = match source {
-                Ok(source) => source,
-                Err(why) => {
-                    log::error!("Error in AudioState::play_audio: {}", why);
-                    self.play_next_song();
-                    continue;
-                }
-            };
-            let input = input::Input::Live(
-                LiveInput::Wrapped(AudioStream {
-                    input: MediaSourceStream::new(source, MediaSourceStreamOptions::default()),
-                    hint: None,
-                }),
-                None,
-            );
-
-            let mut handler = self.handler.lock().await;
-
-            let handle = handler.play_input(input);
-
-            if let Err(why) = handle.add_event(
-                Event::Track(TrackEvent::End),
-                SongEndNotifier {
-                    audio_state: self.clone(),
-                },
-            ) {
-                log::error!("Err AudioState::play_audio: {:?}", why);
             }
-            {
-                let text = song.get_string().await;
-                let channel_id = self.channel_id.lock().await;
 
-                let context = self.context.lock().await;
+            let next_looping_song_to_play = { self.next_looping_song_to_play.lock().await.take() };
+            let next_song = match next_looping_song_to_play {
+                Some(song) => Some(song),
+                None => self.queue.try_pop_ready_song().await,
+            };
+            let audio_reader_config = next_song.as_ref().and_then(Song::get_buf_config);
+            if let (Some(song), Some(buf_config)) = (next_song, audio_reader_config) {
+                let source = get_audio_reader(buf_config).await;
+                let source = match source {
+                    Ok(source) => source,
+                    Err(why) => {
+                        log::error!("Error in AudioState::play_audio: {}", why);
+                        // self.play_next_song();
+                        continue;
+                    }
+                };
+                let input = input::Input::Live(
+                    LiveInput::Wrapped(AudioStream {
+                        input: MediaSourceStream::new(source, MediaSourceStreamOptions::default()),
+                        hint: None,
+                    }),
+                    None,
+                );
 
-                if let Err(why) = send_embed(
-                    &context.http,
-                    *channel_id,
-                    &format!("Now playing:\n\n {}", text),
-                )
-                .await
-                {
+                let mut handler = self.handler.lock().await;
+
+                let handle = handler.play_input(input);
+
+                if let Err(why) = handle.add_event(
+                    Event::Track(TrackEvent::End),
+                    SongEndNotifier {
+                        audio_state: self.clone(),
+                    },
+                ) {
                     log::error!("Err AudioState::play_audio: {:?}", why);
                 }
-            }
+                {
+                    let text = song.get_string().await;
+                    let channel_id = self.channel_id.lock().await;
 
-            if let Err(why) = self.display_ui().await {
-                log::error!("Err AudioState::play_audio: {:?}", why);
-            }
+                    let context = self.context.lock().await;
 
-            let mut current_song = self.current_song.lock().await;
-            *current_song = Some(song);
-            let mut track_handle = self.track_handle.lock().await;
-            *track_handle = Some(handle);
+                    if let Err(why) = send_embed(
+                        &context.http,
+                        *channel_id,
+                        &format!("Now playing:\n\n {}", text),
+                    )
+                    .await
+                    {
+                        log::error!("Err AudioState::play_audio: {:?}", why);
+                    }
+                }
+
+                if let Err(why) = self.display_ui().await {
+                    log::error!("Err AudioState::play_audio: {:?}", why);
+                }
+
+                let mut current_song = self.current_song.lock().await;
+                *current_song = Some(song);
+                let mut track_handle = self.track_handle.lock().await;
+                *track_handle = Some(handle);
+            }
         }
     }
 
@@ -217,10 +194,6 @@ impl AudioState {
         component.start_with_poise_context(ctx).await?;
         *ptr = Some(component);
         Ok(())
-    }
-
-    pub fn play_next_song(&self) {
-        self.song_ready.add_permits(1);
     }
 
     pub async fn add_audio(
@@ -336,10 +309,15 @@ struct SongEndNotifier {
 #[async_trait]
 impl VoiceEventHandler for SongEndNotifier {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        log::info!("song ended, {:?}", SystemTime::now());
-        self.audio_state.play_next_song();
-
+        println!("song ended, {:?}", SystemTime::now());
         let mut current_song = self.audio_state.current_song.lock().await;
+
+        let is_looping = { *self.audio_state.is_looping.lock().await };
+        if is_looping {
+            // this is sound because we are guaranteed that the current song is in the Ready state
+            *self.audio_state.next_looping_song_to_play.lock().await = current_song.take()
+        }
+
         *current_song = None;
         let mut track_handle = self.audio_state.track_handle.lock().await;
         *track_handle = None;

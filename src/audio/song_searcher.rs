@@ -5,13 +5,10 @@ use anyhow::anyhow;
 use super::{
     song::{Song, SongMetadata},
     spotify::SpotifyClient,
-    types::{StreamType, Work},
+    types::StreamType,
 };
 
-pub async fn process_query(
-    query: &str,
-    stream_type: StreamType,
-) -> anyhow::Result<Vec<(Song, Option<Work>)>> {
+pub async fn process_query(query: &str, stream_type: StreamType) -> anyhow::Result<Vec<Song>> {
     if query.contains("spotify") && query.contains("/playlist/") {
         let split: Vec<&str> = query
             .split("/playlist/")
@@ -85,7 +82,7 @@ pub async fn song_recommender(
     query: &str,
     amount: usize,
     stream_type: StreamType,
-) -> anyhow::Result<Vec<(Song, Option<Work>)>> {
+) -> anyhow::Result<Vec<Song>> {
     let split: Vec<&str> = query
         .split("/playlist/")
         .filter(|s| !s.is_empty())

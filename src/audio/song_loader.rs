@@ -1,75 +1,70 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use super::{
-    subprocess::get_pcm_reader_config,
-    types::{QueuePosition, Work},
+    config,
+    song::{Song, SongPlayableState},
+    subprocess::get_audio_reader_config,
 };
-use anyhow::{Context, Ok};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::{
+    sync::Mutex,
+    task::JoinHandle,
+    time::{sleep_until, Instant},
+};
 
 pub struct SongLoader {
-    work: Arc<Mutex<VecDeque<Work>>>,
-    work_sem: Arc<Semaphore>,
+    job_handle: JoinHandle<()>,
 }
 
 impl SongLoader {
-    pub async fn add_work(&self, work: Work, queue_position: QueuePosition) -> anyhow::Result<()> {
-        {
-            let mut queue = self.work.lock().await;
-            match queue_position {
-                QueuePosition::Front => queue.push_front(work),
-                QueuePosition::Back => queue.push_back(work),
-            }
-        }
-        self.work_sem.add_permits(1);
-        Ok(())
-    }
-    async fn loader_loop(
-        work: Arc<Mutex<VecDeque<Work>>>,
-        work_sem: Arc<Semaphore>,
-    ) -> anyhow::Result<()> {
-        while let Some(work) = {
-            {
-                match work_sem.is_closed() {
-                    true => None,
-                    false => {
-                        work_sem.acquire().await.unwrap().forget();
-                        let work = work.clone().lock().await.pop_front().unwrap();
-                        Some(work)
+    async fn loader_loop(songs: Arc<Mutex<VecDeque<Song>>>) {
+        loop {
+            sleep_until(
+                Instant::now()
+                    .checked_add(config::audio::SONG_LOADER_POLL_INTERVAL)
+                    .unwrap(),
+            )
+            .await;
+            let work = {
+                let songs = songs.lock().await;
+                songs.iter().find_map(|song| match &song.state {
+                    SongPlayableState::Ready { .. } => None,
+                    SongPlayableState::Waiting { work } => Some(work.clone()),
+                })
+            };
+            if let Some(work) = work {
+                match get_audio_reader_config(&work.query, work.stream_type).await {
+                    anyhow::Result::Err(err) => {
+                        log::error!("Error loading audio reader config {}", err)
+                    }
+                    anyhow::Result::Ok(config) => {
+                        let mut songs = songs.lock().await;
+                        songs.iter_mut().for_each(|song| match &song.state {
+                            SongPlayableState::Ready { .. } => (),
+                            SongPlayableState::Waiting { work: song_work } => {
+                                if work.eq(song_work) {
+                                    song.state = SongPlayableState::Ready {
+                                        // todo: clone one more time than necessary
+                                        config: config.clone(),
+                                    }
+                                }
+                            }
+                        });
                     }
                 }
             }
-        } {
-            // todo: error shouldnt exit this loop
-            let buf_config = get_pcm_reader_config(&work.query, work.stream_type).await?;
-
-            work.sender
-                .send(Some(buf_config))
-                .await
-                .context("failed to send work")?;
-
-            {
-                let mut is_loaded = work.is_loaded.lock().await;
-                assert!(!*is_loaded);
-                *is_loaded = true;
-            }
         }
-        Ok(())
     }
 
     pub async fn cleanup(&mut self) -> anyhow::Result<()> {
-        self.work_sem.close();
+        self.job_handle.abort();
         Ok(())
     }
 
-    pub fn new() -> Self {
-        let work = Arc::new(Mutex::new(VecDeque::new()));
-        let work_sem = Arc::new(Semaphore::new(0));
-        tokio::spawn({
-            let work = work.clone();
-            let work_sem = work_sem.clone();
-            async move { Self::loader_loop(work, work_sem).await }
+    pub fn start_new(songs: Arc<Mutex<VecDeque<Song>>>) -> Self {
+        let job_handle = tokio::spawn({
+            let songs = songs.clone();
+            async move { Self::loader_loop(songs).await }
         });
-        Self { work, work_sem }
+        Self { job_handle }
     }
 }

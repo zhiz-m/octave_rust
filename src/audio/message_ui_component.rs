@@ -115,21 +115,21 @@ impl MessageUiComponent {
                     ],
                 },
             )),
-                        CreateActionRow::SelectMenu(
-                            CreateSelectMenu::new(
-                                "queue_position",
-                                CreateSelectMenuKind::String {
-                                    options: vec![
-                                        CreateSelectMenuOption::new("Initial queue position: front", "t")
-                                            .default_selection(true)
-                                            .to_owned(),
-                                        CreateSelectMenuOption::new("Initial queue position: back", "f")
-                                            .default_selection(false)
-                                            .to_owned(),
-                                    ],
-                                },
-                            )
-                        ),
+            CreateActionRow::SelectMenu(
+                CreateSelectMenu::new(
+                    "queue_position",
+                    CreateSelectMenuKind::String {
+                        options: vec![
+                            CreateSelectMenuOption::new("Initial queue position: front", "t")
+                                .default_selection(true)
+                                .to_owned(),
+                            CreateSelectMenuOption::new("Initial queue position: back", "f")
+                                .default_selection(false)
+                                .to_owned(),
+                        ],
+                    },
+                )
+            ),
             CreateActionRow::Buttons(vec![
                 CreateButton::new("add_songs")
                     .emoji('🎶')

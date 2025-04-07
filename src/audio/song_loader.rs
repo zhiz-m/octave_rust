@@ -1,5 +1,7 @@
 use std::{collections::VecDeque, sync::Arc};
 
+use crate::audio::types::AudioReaderConfig;
+
 use super::{
     config,
     song::{Song, SongPlayableState},
@@ -32,25 +34,37 @@ impl SongLoader {
                 })
             };
             if let Some(work) = work {
-                match get_audio_reader_config(&work.query, work.stream_type).await {
-                    anyhow::Result::Err(err) => {
-                        log::error!("Error loading audio reader config {}", err)
-                    }
-                    anyhow::Result::Ok(config) => {
-                        let mut songs = songs.lock().await;
-                        songs.iter_mut().for_each(|song| match &song.state {
-                            SongPlayableState::Ready { .. } => (),
-                            SongPlayableState::Waiting { work: song_work } => {
-                                if work.eq(song_work) {
-                                    song.state = SongPlayableState::Ready {
-                                        // todo: clone one more time than necessary
-                                        config: config.clone(),
-                                    }
-                                }
+                let load_audio_reader_config = async || {
+                    for _ in 0..config::audio::GET_AUDIO_READER_NUM_RETRIES {
+                        let source = get_audio_reader_config(&work.query, work.stream_type).await;
+                        match source {
+                            Ok(source) => return source,
+                            Err(err) => {
+                                log::error!("Error loading audio reader config {}", err);
+                                // self.play_next_song();
+                                continue;
                             }
-                        });
+                        };
                     }
-                }
+                    println!(
+                        "failed to load audio after {} retries, skipping",
+                        config::audio::GET_AUDIO_READER_NUM_RETRIES
+                    );
+                    AudioReaderConfig::Error
+                };
+                let config = load_audio_reader_config().await;
+                let mut songs = songs.lock().await;
+                songs.iter_mut().for_each(|song| match &song.state {
+                    SongPlayableState::Ready { .. } => (),
+                    SongPlayableState::Waiting { work: song_work } => {
+                        if work.eq(song_work) {
+                            song.state = SongPlayableState::Ready {
+                                // todo: clone one more time than necessary
+                                config: config.clone(),
+                            }
+                        }
+                    }
+                });
             }
         }
     }

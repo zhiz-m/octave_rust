@@ -1,5 +1,7 @@
+use crate::audio::config;
+
 use super::types::{AudioReaderConfig, StreamType};
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use songbird::input::core::io::MediaSource;
 use std::{
     io::{BufReader, Cursor},
@@ -11,6 +13,7 @@ use symphonia::core::io::ReadOnlySource;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command as TokioCommand,
+    time::timeout,
 };
 
 #[derive(Clone)]
@@ -69,11 +72,15 @@ pub async fn get_audio_reader_config(
     ytdl_query: &str,
     stream_type: StreamType,
 ) -> anyhow::Result<AudioReaderConfig> {
-    let src_url = ytdl(ytdl_query).await;
+    let src_url = timeout(config::audio::YTDL_QUERY_RETRY_INTERVAL, ytdl(ytdl_query)).await?;
     match stream_type {
         StreamType::Online => Ok(AudioReaderConfig::Online { src_url }),
         StreamType::Loudnorm => {
-            let buf = download_audio_buf(src_url.clone()).await?;
+            let buf = timeout(
+                config::audio::YTDL_DOWNLOAD_RETRY_INTERVAL,
+                download_audio_buf(src_url.clone()),
+            )
+            .await??;
             let loudnorm = get_loudnorm_params(&buf).await?;
             let buf = ffmpeg_loudnorm_convert(buf, loudnorm).await?;
             // let volume_delta = ffmpeg_get_volume(&buf).await?;
@@ -359,7 +366,7 @@ pub async fn get_audio_reader(
     config: AudioReaderConfig,
 ) -> anyhow::Result<Box<dyn MediaSource + Send>> {
     let mut cmd = Command::new("ffmpeg");
-    let buf: Box<dyn MediaSource + Send> = match config {
+    match config {
         AudioReaderConfig::Online { src_url } => {
             // songbird supports synchronous IO only, or a synchronous wrapper around async IO,
             // hence we're not using TokioCommand
@@ -391,7 +398,7 @@ pub async fn get_audio_reader(
                 .stdout
                 .context("subprocess::get_audio_reader: failed to get child stdout")?;
             let buf = BufReader::with_capacity(16384 * 32 * 32, stdout);
-            Box::new(ReadOnlySource::new(buf))
+            Ok(Box::new(ReadOnlySource::new(buf)))
         }
         //todo: consider whether one-pass loudnorm is enough. that way we can cut-through stream audio for loudnorm instead of downloading all at once.
         AudioReaderConfig::Loudnorm { buf } => {
@@ -416,10 +423,10 @@ pub async fn get_audio_reader(
             //     .stdout(Stdio::piped())
             //     .stderr(Stdio::null()),
             let reader = Cursor::new(buf);
-            Box::new(ReadOnlySource::new(reader))
+            Ok(Box::new(ReadOnlySource::new(reader)))
         }
-    };
-    Ok(buf)
+        AudioReaderConfig::Error => Err(anyhow!("error loading audio, skipping")),
+    }
 }
 
 /*

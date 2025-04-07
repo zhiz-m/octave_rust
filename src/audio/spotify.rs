@@ -28,8 +28,8 @@ use super::{
 use std::sync::Arc;
 
 pub enum TrackObject {
-    FullTrack(Box<FullTrack>),
-    SimplifiedTrack(Box<SimplifiedTrack>),
+    FullTrack(FullTrack),
+    SimplifiedTrack(SimplifiedTrack),
 }
 
 impl TrackObject {
@@ -101,44 +101,53 @@ impl SpotifyClient {
         let playlist_id = PlaylistId::from_id(playlist_id)?;
         let tracks = self.client.playlist(playlist_id, None, None).await?;
         let items = tracks.tracks.items;
-        let mut tracks = vec![];
-        for data in items.into_iter() {
-            let track = match data.track {
-                Some(PlayableItem::Track(track)) => track,
-                Some(_) => continue,
-                None => continue,
-            };
-            tracks.push(TrackObject::FullTrack(Box::new(track)));
-        }
+        let tracks = items
+            .into_iter()
+            .filter_map(|data| match data.track {
+                Some(PlayableItem::Track(track)) => Some(TrackObject::FullTrack(track)),
+                Some(_) => None,
+                None => None,
+            })
+            .collect();
+        Ok(tracks)
+    }
+    pub async fn get_album(&self, album_id: &str) -> anyhow::Result<Vec<TrackObject>> {
+        let album_id = AlbumId::from_id(album_id)?;
+        let tracks = self.client.album(album_id, None).await?;
+        let items = tracks.tracks.items;
+        let tracks = items
+            .into_iter()
+            .map(TrackObject::SimplifiedTrack)
+            .collect();
         Ok(tracks)
     }
     pub async fn get_track(&self, track_id: &str) -> anyhow::Result<TrackObject> {
         let track_id = TrackId::from_id(track_id)?;
         let track = self.client.track(track_id, None).await?;
-        Ok(TrackObject::FullTrack(Box::new(track)))
+        Ok(TrackObject::FullTrack(track))
     }
     async fn random_from_artist(&self, id: ArtistId<'_>) -> anyhow::Result<TrackObject> {
         let tracks = self
             .client
             .artist_top_tracks(id, Some(Market::Country(Country::Japan)))
             .await?;
-        Ok(TrackObject::FullTrack(Box::new(
+        Ok(TrackObject::FullTrack(
             tracks
                 .into_iter()
                 .choose(&mut rand::thread_rng())
                 .context("returned tracks was empty")?,
-        )))
+        ))
     }
     async fn random_from_album(&self, id: AlbumId<'_>) -> anyhow::Result<TrackObject> {
         let album = self.client.album(id, None).await?;
-        Ok(TrackObject::SimplifiedTrack(Box::new(
+        Ok(TrackObject::SimplifiedTrack(
             album
                 .tracks
                 .items
                 .into_iter()
                 .choose(&mut rand::thread_rng())
                 .context("returned tracks was empty")?,
-        )))
+        ))
     }
     //  -> Result<Vec<(Song, Option<Work>)>, String>
     pub async fn recommend_playlist(

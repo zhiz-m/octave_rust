@@ -26,6 +26,7 @@ impl Default for StreamType {
 pub enum AudioReaderConfig {
     Online { src_url: String },
     Loudnorm { buf: Vec<u8> },
+    Error,
 }
 
 #[derive(Clone, PartialEq, Eq)]

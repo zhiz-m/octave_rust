@@ -31,7 +31,7 @@ use songbird::{
     Call, Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent,
 };
 use tokio::{
-    sync::{Mutex, Semaphore},
+    sync::Mutex,
     time::{sleep_until, Instant},
 };
 

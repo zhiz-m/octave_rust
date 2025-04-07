@@ -23,15 +23,8 @@ pub async fn process_query(query: &str, stream_type: StreamType) -> anyhow::Resu
             .find(|s| !s.is_empty())
             .expect("Logical error: process_query's playlist_id contains items?");
 
-        let client = SpotifyClient::new().await;
-        let client = match client {
-            Ok(client) => client,
-            Err(why) => return Err(why),
-        };
-        let tracks = match client.get_playlist(playlist_id).await {
-            Ok(tracks) => tracks,
-            Err(why) => return Err(why),
-        };
+        let client = SpotifyClient::new().await?;
+        let tracks = client.get_playlist(playlist_id).await?;
         Ok(SpotifyClient::process_track_objects(tracks, stream_type))
     } else if query.contains("spotify") && query.contains("/track/") {
         let split: Vec<&str> = query.split("/track/").filter(|s| !s.is_empty()).collect();
@@ -44,19 +37,26 @@ pub async fn process_query(query: &str, stream_type: StreamType) -> anyhow::Resu
             .find(|s| !s.is_empty())
             .expect("Logical error: process_query's track_id contains items?");
 
-        let client = SpotifyClient::new().await;
-        let client = match client {
-            Ok(client) => client,
-            Err(why) => return Err(why),
-        };
-        let track = match client.get_track(playlist_id).await {
-            Ok(track) => track,
-            Err(why) => return Err(why),
-        };
+        let client = SpotifyClient::new().await?;
+        let track = client.get_track(playlist_id).await?;
         Ok(SpotifyClient::process_track_objects(
             vec![track],
             stream_type,
         ))
+    } else if query.contains("spotify") && query.contains("/album/") {
+        let split: Vec<&str> = query.split("/album/").filter(|s| !s.is_empty()).collect();
+        if split.len() != 2 {
+            return Err(anyhow!("invalid spotify album URL"));
+        }
+        let album_id = split[1];
+        let album_id = album_id
+            .split('?')
+            .find(|s| !s.is_empty())
+            .expect("Logical error: process_query's album_id contains items?");
+
+        let client = SpotifyClient::new().await?;
+        let tracks = client.get_album(album_id).await?;
+        Ok(SpotifyClient::process_track_objects(tracks, stream_type))
     } else {
         let data = if query.contains("watch?v=") {
             (Some(query.to_string()), None)

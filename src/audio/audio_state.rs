@@ -267,15 +267,9 @@ impl AudioState {
     }
 
     // on success, returns a bool that specifies whether the queue is now being looped
-    pub async fn change_looping(&self, try_loop: Option<bool>) -> anyhow::Result<bool> {
-        {
-            let current_song = self.current_song.lock().await;
-            if current_song.is_none() {
-                return Err(anyhow!("no song is playing"));
-            }
-        }
+    pub async fn change_looping(&self, force_looping: Option<bool>) -> anyhow::Result<bool> {
         let mut is_looping = self.is_looping.lock().await;
-        *is_looping = try_loop.unwrap_or(!*is_looping);
+        *is_looping = force_looping.unwrap_or(!*is_looping);
         Ok(*is_looping)
     }
 

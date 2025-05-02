@@ -81,7 +81,7 @@ pub async fn get_audio_reader_config(
                 download_audio_buf(src_url.clone()),
             )
             .await??;
-            let loudnorm = get_loudnorm_params(&buf).await?;
+            let loudnorm = get_loudnorm_params(buf.clone()).await?;
             let buf = ffmpeg_loudnorm_convert(buf, loudnorm).await?;
             // let volume_delta = ffmpeg_get_volume(&buf).await?;
             Ok(AudioReaderConfig::Loudnorm { buf })
@@ -149,11 +149,9 @@ async fn download_audio_buf(url: String) -> anyhow::Result<Vec<u8>> {
     Ok(out.stdout)
 }
 
-async fn get_loudnorm_params(buf: &[u8]) -> anyhow::Result<LoudnormConfig> {
+async fn get_loudnorm_params(buf: Vec<u8>) -> anyhow::Result<LoudnormConfig> {
     let mut cmd = TokioCommand::new("ffmpeg");
     let cmd = cmd
-        .arg("-f")
-        .arg("mp3")
         .arg("-i")
         .arg("pipe:0")
         .arg("-af")
@@ -167,17 +165,32 @@ async fn get_loudnorm_params(buf: &[u8]) -> anyhow::Result<LoudnormConfig> {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = cmd.spawn().context("failed to spawn child")?;
-    let stdin = child.stdin.as_mut().unwrap();
-    if let Err(x) = stdin.write_all(buf).await {
-        log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
-    };
+    let child = cmd.spawn().context("failed to spawn child")?;
+    let mut stdin = child.stdin.unwrap();
+    {
+        let future = async move {
+            if let Err(x) = stdin
+                .write_all(&buf)
+                .await
+                .context("failed to write data to buffer")
+            {
+                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
+            };
+            if let Err(x) = stdin.shutdown().await.context("failed to shutdown stdin") {
+                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
+            };
+        };
+        tokio::task::spawn(future);
+    }
 
-    let out = child
-        .wait_with_output()
+    let mut buf = vec![];
+    child
+        .stderr
+        .unwrap()
+        .read_to_end(&mut buf)
         .await
-        .context("failed to wait for child stdout")?;
-    parse_loudnorm_params(str::from_utf8(&out.stderr).unwrap())
+        .context("failed to wait for child stderr")?;
+    parse_loudnorm_params(str::from_utf8(&buf).unwrap())
 }
 
 fn parse_loudnorm_params(buf: &str) -> anyhow::Result<LoudnormConfig> {

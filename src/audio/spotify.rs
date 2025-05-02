@@ -20,12 +20,12 @@ use tokio::{
 };
 
 use super::{
-    config::spotify_recommend as sr,
+    config::{self, spotify_recommend as sr},
     song::{Song, SongMetadata},
     types::StreamType,
 };
 
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 pub enum TrackObject {
     FullTrack(FullTrack),
@@ -71,9 +71,14 @@ pub struct SpotifyClient {
 
 impl SpotifyClient {
     pub async fn new() -> anyhow::Result<SpotifyClient> {
+        // old credentials, delete soon
+        // let creds = Credentials::new(
+        //     "5f573c9620494bae87890c0f08a60293",
+        //     "212476d9b0f3472eaa762d90b19b0ba8",
+        // );
         let creds = Credentials::new(
-            "5f573c9620494bae87890c0f08a60293",
-            "212476d9b0f3472eaa762d90b19b0ba8",
+            &env::var(config::env::SPOTIFY_CLIENT_ID).expect("Error: token not found"),
+            &env::var(config::env::SPOTIFY_CLIENT_SECRET).expect("Error: token not found"),
         );
         let spotify = ClientCredsSpotify::new(creds);
         spotify.request_token().await?;

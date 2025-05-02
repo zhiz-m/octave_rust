@@ -82,7 +82,7 @@ async fn main() {
             })
         })
         .build();
-    let token = env::var("OCTAVE_BOT_TOKEN").expect("Error: token not found");
+    let token = env::var(audio::config::env::DISCORD_BOT_TOKEN).expect("Error: token not found");
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::GUILD_VOICE_STATES
         | GatewayIntents::MESSAGE_CONTENT

@@ -266,8 +266,15 @@ impl MessageUiComponent {
                 // mci.create_response(context, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new())).await?;
             }
             "loop" => {
-                audio_state.change_looping(None).await?;
-                mci.defer(&context.http).await?;
+                let is_looping = audio_state.change_looping(None).await?;
+                mci.create_response(
+                    &context.http,
+                    CreateInteractionResponse::Message(
+                        CreateInteractionResponseMessage::new().add_embed(
+                            get_styled_embed(&format!("Looping: {}", is_looping)).to_owned(),
+                        ),
+                    ),
+                ).await?
                 // mci.create_response(context, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new())).await?;
             }
             "play_pause" => {

@@ -18,3 +18,9 @@ pub mod audio {
     pub const BOT_PREFIX: &str = "o.";
     pub const MESSAGE_UI_COMPONENT_CHAIN_INTERVAL_MS: u64 = 500;
 }
+
+pub mod env {
+    pub const DISCORD_BOT_TOKEN: &str = "OCTAVE_BOT_TOKEN";
+    pub const SPOTIFY_CLIENT_ID: &str = "SPOTIFY_CLIENT_ID";
+    pub const SPOTIFY_CLIENT_SECRET: &str = "SPOTIFY_CLIENT_SECRET";
+}

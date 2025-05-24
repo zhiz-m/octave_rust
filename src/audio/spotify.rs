@@ -21,7 +21,7 @@ use tokio::{
 
 use super::{
     config::{self, spotify_recommend as sr},
-    song::{Song, SongMetadata},
+    song::{self, Song, SongMetadata},
     types::StreamType,
 };
 
@@ -84,26 +84,31 @@ impl SpotifyClient {
         spotify.request_token().await?;
         Ok(SpotifyClient { client: spotify })
     }
+
     pub fn process_track_objects(tracks: Vec<TrackObject>, stream_type: StreamType) -> Vec<Song> {
         tracks
             .iter()
-            .filter_map(|track| {
+            .map(|track| {
                 let artist = track.artist();
                 let title = track.title();
+                let how_to_find =
+                    song::HowToFind::SearchQuery(SpotifyClient::get_query_string(artist, title));
                 let metadata = SongMetadata {
-                    search_query: Some(SpotifyClient::get_query_string(artist, title)),
                     artist: Some(artist.to_string()),
                     title: Some(title.to_string()),
-                    youtube_url: None,
                     duration: Some(track.duration() as u64),
+                    how_to_find,
                 };
 
                 Song::new_load(metadata, stream_type)
             })
             .collect()
     }
-    pub async fn get_playlist(&self, playlist_id: &str) -> anyhow::Result<Vec<TrackObject>> {
-        let playlist_id = PlaylistId::from_id(playlist_id)?;
+
+    pub async fn get_playlist(
+        &self,
+        playlist_id: PlaylistId<'_>,
+    ) -> anyhow::Result<Vec<TrackObject>> {
         let tracks = self.client.playlist(playlist_id, None, None).await?;
         let items = tracks.tracks.items;
         let tracks = items
@@ -116,8 +121,7 @@ impl SpotifyClient {
             .collect();
         Ok(tracks)
     }
-    pub async fn get_album(&self, album_id: &str) -> anyhow::Result<Vec<TrackObject>> {
-        let album_id = AlbumId::from_id(album_id)?;
+    pub async fn get_album(&self, album_id: AlbumId<'_>) -> anyhow::Result<Vec<TrackObject>> {
         let tracks = self.client.album(album_id, None).await?;
         let items = tracks.tracks.items;
         let tracks = items
@@ -126,8 +130,7 @@ impl SpotifyClient {
             .collect();
         Ok(tracks)
     }
-    pub async fn get_track(&self, track_id: &str) -> anyhow::Result<TrackObject> {
-        let track_id = TrackId::from_id(track_id)?;
+    pub async fn get_track(&self, track_id: TrackId<'_>) -> anyhow::Result<TrackObject> {
         let track = self.client.track(track_id, None).await?;
         Ok(TrackObject::FullTrack(track))
     }
@@ -158,7 +161,7 @@ impl SpotifyClient {
     pub async fn recommend_playlist(
         self: Arc<Self>,
         amount: usize,
-        playlist_id: &str,
+        playlist_id: PlaylistId<'_>,
     ) -> anyhow::Result<Vec<TrackObject>> {
         let mut tasks = vec![];
         let tracks = self.get_playlist(playlist_id).await?;

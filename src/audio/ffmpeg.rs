@@ -1,6 +1,9 @@
 use crate::audio::config;
 
-use super::types::{AudioReaderConfig, StreamType};
+use super::{
+    types::{AudioReaderConfig, StreamType},
+    ytdl,
+};
 use anyhow::{anyhow, Context};
 use songbird::input::core::io::MediaSource;
 use std::{
@@ -12,7 +15,7 @@ use std::{
 use symphonia::core::io::ReadOnlySource;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    process::Command as TokioCommand,
+    process::{ChildStdin, Command as TokioCommand},
     time::timeout,
 };
 
@@ -24,55 +27,15 @@ struct LoudnormConfig {
     threshold: f64,
 }
 
-// pub struct AudioReaderConfig {
-//     buf: Option<Vec<u8>>,
-//     // volume_delta: Option<f64>,
-//     stream_type: StreamType,
-//     src_url: String,
-// }
-
-// pub struct BufReaderSeek<T: Read + Send> {
-//     inner: BufReader<T>,
-// }
-
-// impl<T: Read + Send> BufReaderSeek<T> {
-//     pub fn new(inner: BufReader<T>) -> BufReaderSeek<T> {
-//         BufReaderSeek { inner }
-//     }
-// }
-
-// impl<T: Read + Send + Sync> MediaSource for BufReaderSeek<T> {
-//     fn is_seekable(&self) -> bool {
-//         false
-//     }
-
-//     fn byte_len(&self) -> Option<u64> {
-//         None
-//     }
-// }
-
-// impl<T: Read + Send> Seek for BufReaderSeek<T> {
-//     fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
-//         Err(std::io::Error::new(
-//             std::io::ErrorKind::Other,
-//             "seek not supported",
-//         ))
-//     }
-// }
-
-// impl<T: Read + Send> Read for BufReaderSeek<T> {
-//     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-//         let res = self.inner.read(buf);
-//         println!("read {:?} bytes", res);
-//         res
-//     }
-// }
-
 pub async fn get_audio_reader_config(
     ytdl_query: &str,
     stream_type: StreamType,
 ) -> anyhow::Result<AudioReaderConfig> {
-    let src_url = timeout(config::audio::YTDL_QUERY_RETRY_INTERVAL, ytdl(ytdl_query)).await?;
+    let src_url = timeout(
+        config::audio::YTDL_QUERY_RETRY_INTERVAL,
+        ytdl::ytdl_get_source_url(ytdl_query),
+    )
+    .await?;
     match stream_type {
         StreamType::Online => Ok(AudioReaderConfig::Online { src_url }),
         StreamType::Loudnorm => {
@@ -89,20 +52,6 @@ pub async fn get_audio_reader_config(
     }
 }
 
-async fn ytdl(query: &str) -> String {
-    let mut cmd = TokioCommand::new("yt-dlp");
-    let cmd = cmd
-        .arg("-x")
-        .arg("--skip-download")
-        .arg("--get-url")
-        //.arg("--audio-quality").arg("128k")
-        .arg(query);
-    let out = cmd.output().await.unwrap();
-
-    // let error = String::from_utf8(out.stderr).unwrap();
-    // println!("youtube-dl returned {}, err {}", &result, &error);
-    String::from_utf8(out.stdout).unwrap()
-}
 /*
 async fn download_audio(mut url: String) -> Result<Vec<u8>, String> {
     url.pop();
@@ -149,6 +98,22 @@ async fn download_audio_buf(url: String) -> anyhow::Result<Vec<u8>> {
     Ok(out.stdout)
 }
 
+fn pipe_to_stdin_async(buf: Vec<u8>, mut stdin: ChildStdin, context: &'static str) {
+    let future = async move {
+        if let Err(x) = stdin
+            .write_all(&buf)
+            .await
+            .context("failed to write data to buffer")
+        {
+            log::warn!("Warning: {} error: {}", context, x);
+        };
+        if let Err(x) = stdin.shutdown().await.context("failed to shutdown stdin") {
+            log::warn!("Warning: {} error: {}", context, x);
+        };
+    };
+    tokio::task::spawn(future);
+}
+
 async fn get_loudnorm_params(buf: Vec<u8>) -> anyhow::Result<LoudnormConfig> {
     let mut cmd = TokioCommand::new("ffmpeg");
     let cmd = cmd
@@ -166,22 +131,8 @@ async fn get_loudnorm_params(buf: Vec<u8>) -> anyhow::Result<LoudnormConfig> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     let child = cmd.spawn().context("failed to spawn child")?;
-    let mut stdin = child.stdin.unwrap();
-    {
-        let future = async move {
-            if let Err(x) = stdin
-                .write_all(&buf)
-                .await
-                .context("failed to write data to buffer")
-            {
-                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
-            };
-            if let Err(x) = stdin.shutdown().await.context("failed to shutdown stdin") {
-                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
-            };
-        };
-        tokio::task::spawn(future);
-    }
+    let stdin = child.stdin.unwrap();
+    pipe_to_stdin_async(buf, stdin, "subprocess::get_loudnorm_params");
 
     let mut buf = vec![];
     child
@@ -297,22 +248,8 @@ async fn ffmpeg_loudnorm_convert(
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
     let child = cmd.spawn().context("failed to spawn child")?;
-    let mut stdin = child.stdin.unwrap();
-    {
-        let future = async move {
-            if let Err(x) = stdin
-                .write_all(&buf)
-                .await
-                .context("failed to write data to buffer")
-            {
-                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
-            };
-            if let Err(x) = stdin.shutdown().await.context("failed to shutdown stdin") {
-                log::warn!("Warning: subprocess::get_loudnorm_params error: {}", x);
-            };
-        };
-        tokio::task::spawn(future);
-    }
+    let stdin = child.stdin.unwrap();
+    pipe_to_stdin_async(buf, stdin, "subprocess::ffmpeg_loudnorm_convert");
 
     let mut buf = vec![];
     child

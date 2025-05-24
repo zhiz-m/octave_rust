@@ -1,6 +1,7 @@
 use audio::{
     audio_state::AudioState,
     config::{self, audio::BOT_PREFIX},
+    db::Db,
 };
 use serenity::all::ClientBuilder;
 use songbird::SerenityInit;
@@ -89,6 +90,7 @@ async fn main() {
         | GatewayIntents::GUILDS;
     let client = ClientBuilder::new(token, intents)
         .framework(framework)
+        .type_map_insert::<Db>(Db::new("./.db.json".to_string()).unwrap())
         .register_songbird()
         .await;
     rustls::crypto::ring::default_provider()

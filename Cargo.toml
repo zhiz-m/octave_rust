@@ -20,6 +20,8 @@ log = "0.4"
 async-trait = "0.1"
 rustls = {version = "0.23.*", features = ["ring"]}
 reqwest = "0.12.*"
+serde_json = "1.0"
+serde = "1"
 
 [profile.dev]
 opt-level = 0

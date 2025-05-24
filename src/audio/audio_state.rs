@@ -12,11 +12,11 @@ use std::{
 
 use super::{config, types::QueuePosition};
 use super::{
+    ffmpeg::get_audio_reader,
     message_ui_component::MessageUiComponent,
     song::Song,
     song_queue::SongQueue,
     song_searcher::{process_query, song_recommender},
-    subprocess::get_audio_reader,
     types::StreamType,
 };
 use poise::serenity_prelude::{ChannelId, Context};

@@ -5,11 +5,16 @@ pub enum SongPlayableState {
     Ready { config: AudioReaderConfig },
 }
 
+#[derive(Clone)]
+pub enum HowToFind {
+    SearchQuery(String),
+    YoutubeTrackUrl(String),
+}
+
 pub struct SongMetadata {
     pub artist: Option<String>,
     pub title: Option<String>,
-    pub search_query: Option<String>,
-    pub youtube_url: Option<String>,
+    pub how_to_find: HowToFind,
     pub duration: Option<u64>,
 }
 
@@ -19,16 +24,15 @@ pub struct Song {
 }
 
 impl Song {
-    pub fn new_load(metadata: SongMetadata, stream_type: StreamType) -> Option<Self> {
-        let query = match metadata.youtube_url.clone() {
-            Some(url) => url,
-            None => format!("ytsearch:{} official music", metadata.search_query.clone()?),
+    pub fn new_load(metadata: SongMetadata, stream_type: StreamType) -> Self {
+        let query = match metadata.how_to_find.clone() {
+            HowToFind::YoutubeTrackUrl(url) => url,
+            HowToFind::SearchQuery(query) => format!("ytsearch:{} official music", query),
         };
 
         let work = SongLoaderWork { query, stream_type };
         let state = SongPlayableState::Waiting { work };
-        let song = Song { state, metadata };
-        Some(song)
+        Song { state, metadata }
     }
 
     pub fn get_buf_config(&self) -> Option<AudioReaderConfig> {

@@ -4,8 +4,8 @@ use crate::audio::types::AudioReaderConfig;
 
 use super::{
     config,
+    ffmpeg::get_audio_reader_config,
     song::{Song, SongPlayableState},
-    subprocess::get_audio_reader_config,
 };
 use tokio::{
     sync::Mutex,
